@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Análise de Faturamento — Água e Esgoto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="description" content="Selecione a pasta com os arquivos e gere o relatório comparativo de água e esgoto no navegador.">
+<style>
+:root {
+  /* Paleta: #05050D | #1A2740 | #394D73 | #49668C | #F2F2F2 | laranja #E8710A (negativo) */
+  --preto: #05050D;
+  --marinho: #1A2740;
+  --azul: #394D73;
+  --azul-claro: #49668C;
+  --cinza: #F2F2F2;
+  --laranja: #E8710A;
+  --laranja-texto: #C2560C;
+  --text: #05050D;
+  --muted: #49668C;
+  --line: #DCE1E9;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: var(--text);
+  background: linear-gradient(135deg, var(--preto) 0%, var(--marinho) 55%, var(--azul) 100%);
+  background-attachment: fixed;
+  line-height: 1.55;
+}
+
+/* ===== Tela inicial ===== */
+.inicio {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+.painel {
+  width: 100%;
+  max-width: 620px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  padding: 32px 32px 26px;
+}
+.badge {
+  display: inline-block;
+  font-size: 12px; font-weight: 600;
+  color: var(--azul);
+  background: #E1E7F0;
+  padding: 4px 12px; border-radius: 20px; margin-bottom: 12px;
+}
+h1 { margin: 0 0 8px; font-size: clamp(1.5rem, 4vw, 1.9rem); line-height: 1.2; font-weight: 600; letter-spacing: -.015em; color: var(--marinho); }
+.lead { margin: 0 0 22px; color: var(--muted); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: none; border-radius: 10px; cursor: pointer;
+  font: inherit; font-weight: 700; text-decoration: none;
+}
+.btn:disabled { opacity: .6; cursor: wait; }
+.btn:focus-visible { outline: 2px solid var(--azul-claro); outline-offset: 2px; }
+.btn-principal {
+  width: 100%; padding: 15px 20px; font-size: 1rem; font-weight: 600;
+  background: var(--marinho); color: #FFFFFF;
+}
+.btn-principal:hover:not(:disabled) { background: var(--azul); }
+.btn-secundario {
+  width: 100%; margin-top: 10px; padding: 11px 16px; font-size: .92rem;
+  background: #FFFFFF; color: var(--marinho); border: 1px solid var(--line);
+}
+.btn-secundario:hover:not(:disabled) { border-color: var(--azul-claro); color: var(--azul-claro); }
+
+.orientacoes { margin: 24px 0 0; padding: 18px 20px; background: var(--cinza); border-radius: 12px; }
+.orientacoes h2 { margin: 0 0 8px; font-size: .92rem; font-weight: 600; color: var(--marinho); }
+.orientacoes ul { margin: 0; padding-left: 18px; font-size: .9rem; }
+.orientacoes li { margin-bottom: 6px; }
+.orientacoes li:last-child { margin-bottom: 0; }
+code { font-family: Consolas, "Courier New", monospace; font-size: .9em; background: #E1E7F0; padding: 1px 5px; border-radius: 4px; }
+
+/* Progresso */
+.progresso { margin-top: 22px; }
+.progresso-topo { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: .95rem; }
+.progresso-topo b { color: var(--marinho); }
+.progresso-topo span { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+.barra { height: 10px; background: #E1E7F0; border-radius: 6px; overflow: hidden; margin: 8px 0; }
+.barra-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--marinho), var(--azul-claro)); transition: width .3s; }
+.nota { margin: 0; font-size: .86rem; color: var(--muted); }
+.arquivos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.arquivo { font-size: .78rem; background: #E1E7F0; color: var(--marinho); padding: 2px 10px; border-radius: 12px; }
+.progresso.erro .barra-fill { background: var(--laranja); }
+.progresso.erro .nota { color: var(--laranja-texto); font-weight: 600; }
+.log { margin-top: 10px; }
+.log summary { cursor: pointer; font-size: .85rem; color: var(--azul); font-weight: 600; }
+.log pre {
+  margin: 8px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap;
+  background: var(--preto); color: var(--cinza); padding: 12px; border-radius: 8px; font-size: .75rem;
+}
+
+.rodape { margin-top: 18px; text-align: center; font-size: .8rem; color: var(--muted); }
+.rodape a { color: var(--muted); }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
+
+/* ===== Relatório em tela cheia ===== */
+.visualizador { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--cinza); z-index: 10; }
+.barra-relatorio {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--marinho); color: #FFFFFF;
+}
+.barra-relatorio .titulo { font-weight: 700; font-size: .92rem; margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.btn-barra {
+  padding: 7px 12px; font-size: .82rem; font-weight: 600; border-radius: 6px;
+  background: rgba(255,255,255,.1); color: #FFFFFF; border: 1px solid rgba(255,255,255,.25);
+}
+.btn-barra:hover { background: rgba(255,255,255,.2); }
+#quadroRelatorio { flex: 1; width: 100%; border: 0; background: var(--cinza); }
+body.relatorio-aberto { overflow: hidden; }
+
+
+/* ===== Conferência do Top 20 ===== */
+.etapa-top20 { position: fixed; inset: 0; z-index: 9; background: linear-gradient(135deg, var(--preto) 0%, var(--marinho) 55%, var(--azul) 100%); overflow: hidden; padding: 12px 16px; display: flex; justify-content: center; align-items: stretch; }
+.painel-top20 { width: 100%; max-width: 1560px; min-height: 0; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 12px 18px 10px; }
+.painel-top20 h2 { margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--marinho); }
+.painel-top20 .badge { margin: 0 8px 0 0; font-size: 11px; padding: 2px 9px; vertical-align: middle; }
+.painel-top20 .lead { margin: 2px 0 8px; font-size: .8rem; line-height: 1.35; }
+.tabela-rolagem { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+/* etapa 2: tabela de clientes + quadro com os totais por grupo de leitura ao lado */
+.corpo-top20 { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
+.corpo-top20 > .tabela-rolagem { min-width: 0; }
+.quadro-grupos { flex: 0 0 640px; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #F7F9FC; }
+.quadro-grupos h3 { margin: 0; font-size: .9rem; color: var(--marinho); }
+.quadro-grupos p { margin: 2px 0 6px; font-size: .72rem; color: var(--muted); line-height: 1.3; }
+.quadro-grupos .rolagem-grupos { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.tabela-grupos { width: 100%; border-collapse: collapse; font-size: .78rem; font-variant-numeric: tabular-nums; }
+.tabela-grupos th { position: sticky; top: 0; background: var(--marinho); color: #fff; font-weight: 600; padding: 4px 6px; text-align: left; white-space: nowrap; }
+.tabela-grupos thead tr + tr th { top: 23px; background: var(--azul, #1F5A96); font-weight: 500; font-size: .72rem; }
+.tabela-grupos th.grp { text-align: center; border-left: 1px solid rgba(255,255,255,.25); }
+.tabela-grupos td.ant { color: var(--muted); }
+.tabela-grupos th.num, .tabela-grupos td.num { text-align: right; }
+.tabela-grupos td { padding: 3px 6px; border-top: 1px solid var(--line); white-space: nowrap; }
+.tabela-grupos tr.alterado td { background: #FFF4EA; }
+.tabela-grupos tr.alterado td:first-child { box-shadow: inset 3px 0 0 var(--laranja); font-weight: 700; }
+.tabela-grupos tfoot td { position: sticky; bottom: 0; background: var(--marinho); color: #fff; font-weight: 700; }
+.tabela-grupos .neg { color: var(--laranja-texto); }
+.tabela-grupos tfoot .neg { color: #FFB37A; }
+.tabela-top20 td.ant { color: var(--muted); }
+.tabela-top20 th.marcar, .tabela-top20 td.marcar { text-align: center; width: 28px; padding-left: 4px; padding-right: 4px; }
+.tabela-top20 td.sug { white-space: nowrap; }
+.tabela-top20 .btn-min { margin-left: 6px; padding: 1px 7px; font-size: .72rem; border: 1px solid var(--azul, #1F5A96); color: var(--azul, #1F5A96);
+  background: #fff; border-radius: 6px; cursor: pointer; }
+.tabela-top20 .btn-min:hover { background: var(--azul, #1F5A96); color: #fff; }
+.tabela-top20 input.recalculado { background: #EEF5FF; }
+.nota-tarifa { font-size: .74rem; color: var(--muted); margin-left: auto; align-self: center; }
+.tabela-grupos td.alerta { color: #B42318; font-weight: 700; }
+.tabela-grupos tfoot td.alerta { color: #FFB4A8; }
+@media (max-width: 1700px) { .corpo-top20 { flex-direction: column; } .quadro-grupos { flex: 0 0 auto; max-height: 38vh; } }
+.tabela-top20 { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.tabela-top20 th { position: sticky; top: 0; z-index: 1; background: var(--marinho); color: #fff; font-weight: 600; text-align: left; padding: 6px 10px; white-space: nowrap; }
+.tabela-top20 th.num, .tabela-top20 td.num { text-align: right; }
+.tabela-top20 th.ordenavel { cursor: pointer; user-select: none; }
+.tabela-top20 th.ordenavel:hover { background: var(--azul); }
+.tabela-top20 .seta { font-size: .7rem; opacity: .9; }
+.tabela-top20 td { padding: 3px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+.tabela-top20 tr:nth-child(even) td { background: #F7F8FA; }
+.tabela-top20 td.cli { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabela-top20 input {
+  width: 110px; padding: 3px 8px; font: inherit; font-size: .82rem; text-align: right; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--preto);
+}
+.tabela-top20 input[type="checkbox"] { width: auto; padding: 0; margin: 0; cursor: pointer; accent-color: var(--azul, #1F5A96); }
+.tabela-top20 input[data-campo] { width: 92px; }
+/* lista mais compacta: SUP e categoria não quebram em duas linhas, células mais estreitas */
+.tabela-top20 td, .tabela-top20 th { padding-left: 7px; padding-right: 7px; }
+.tabela-top20 td.cat { white-space: nowrap; max-width: 125px; overflow: hidden; text-overflow: ellipsis; }
+.tabela-top20 input:focus { outline: 2px solid var(--azul-claro); outline-offset: 0; border-color: var(--azul-claro); }
+.tabela-top20 input.alterado { border-color: var(--laranja); background: #FFF4EA; }
+.tabela-top20 input.invalido { border-color: #B42318; background: #FDECEA; }
+.tabela-top20 .orig { display: none; font-size: .7rem; color: var(--muted); text-align: right; }
+.acoes-top20 { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); flex: none; }
+.acoes-top20 .btn { padding: 8px 14px; font-size: .86rem; font-weight: 600; }
+.acoes-top20 .btn-principal { width: auto; }
+.acoes-top20 .btn-secundario { width: auto; margin-top: 0; }
+.acoes-top20 .contador { margin-left: auto; font-size: .86rem; color: var(--muted); }
+.acoes-top20 .contador b { color: var(--laranja-texto); }
+
+@media (max-width: 520px) {
+  .painel { padding: 24px 20px 20px; }
+  .barra-relatorio .titulo { flex-basis: 100%; }
+}
+
+/* ===== Layout v2: cabeçalho com "Conectar pasta" (mesmo padrão do DRE Unificado) ===== */
+body { background: var(--cinza); background-attachment: scroll; min-height: 100%; display: flex; flex-direction: column; height: auto; }
+html { height: 100%; }
+.top { background: linear-gradient(135deg, var(--preto) 0%, var(--marinho) 55%, var(--azul) 100%); color: #fff; padding: 16px 20px 12px; }
+.top-linha { display: flex; justify-content: space-between; align-items: center; gap: 12px 24px; flex-wrap: wrap; max-width: 1240px; margin: 0 auto; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #9FB4D6; }
+.versao { text-transform: none; display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 10px; background: rgba(255,255,255,.15); color: #fff; letter-spacing: 0; }
+.top h1 { margin: 2px 0 0; color: #fff; font-size: clamp(1.2rem, 3vw, 1.6rem); }
+.ferramentas { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn-top { padding: 9px 14px; border-radius: 8px; font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); text-decoration: none; }
+.btn-top:hover:not(:disabled) { background: rgba(255,255,255,.22); }
+.btn-top:disabled { opacity: .6; cursor: wait; }
+.btn-top:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.fonte-status { max-width: 1240px; margin: 8px auto 0; font-size: .85rem; color: #C8D4EA; }
+.top .progresso { max-width: 1240px; margin: 8px auto 0; }
+.prog-linha { display: flex; align-items: center; gap: 12px; font-size: .85rem; color: #D5E0F2; }
+.prog-linha .barra { flex: 0 1 320px; width: 320px; height: 8px; margin: 0; background: rgba(255,255,255,.2); }
+.prog-linha b { color: #fff; font-variant-numeric: tabular-nums; min-width: 38px; }
+.top .nota { color: #C8D4EA; margin-top: 4px; }
+.top .arquivo { background: rgba(255,255,255,.15); color: #fff; }
+.top .progresso.erro .nota { color: #FFC9A0; }
+.top .log summary { color: #C8D4EA; }
+.log-ferramentas { margin-top: 6px; }
+.log-ferramentas button { font: inherit; font-size: .78rem; padding: 3px 10px; border-radius: 6px; cursor: pointer; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); }
+.conteudo { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.conteudo .orientacoes { max-width: 820px; width: calc(100% - 32px); margin: 24px auto; background: #fff; border: 1px solid var(--line); }
+#quadroRelatorio { flex: 1; width: 100%; min-height: calc(100vh - 150px); border: 0; background: var(--cinza); }
+body.relatorio-aberto { overflow: auto; }
+body.top20-aberto { overflow: hidden; }
+
+/* ===== Paleta e componentes do DRE_Unificado ===== */
+:root { --navy:#102840; --blue:#176b9c; --cyan:#16a5b8; --ink:#1f2d3d; --muted:#64748b; --line:#dbe4ec; --bg:#f3f6f9; }
+body { background: var(--bg); color: var(--ink); font-family: "Segoe UI", Arial, sans-serif; font-size: 14px; }
+.top { background: linear-gradient(120deg, var(--navy), #174f70); padding: 22px 34px 18px; }
+.top-linha, .fonte-status, .top .progresso { max-width: none; }
+.eyebrow { color: #9fe1e7; font-size: 11px; letter-spacing: 1.6px; font-weight: 700; }
+.versao { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.4); font-size: 10.5px; letter-spacing: .6px; font-weight: 800; padding: 1px 9px; border-radius: 99px; }
+.top h1 { font-size: 26px; margin: 5px 0 3px; }
+.btn-top { border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 400; }
+.fgroup { display: flex; align-items: center; border: 1px solid rgba(255,255,255,.38); border-radius: 9px; background: rgba(255,255,255,.07); position: relative; }
+.fgroup[hidden] { display: none; }
+.fgroup .flabel { padding: 8px 10px; color: #d5e7ef; font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .45px; }
+.fbtn { border: 0; border-left: 1px solid rgba(255,255,255,.25); background: transparent; color: #fff; padding: 8px 11px; font-size: 11px; font-weight: 800; cursor: pointer; }
+.fbtn:last-child { border-radius: 0 8px 8px 0; }
+.fbtn.active { background: #fff; color: #0d5f98; }
+.fgroup select { border: 0; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 8px 8px 0; background: transparent; color: #fff; padding: 8px 11px; font-size: 12px; cursor: pointer; }
+.fgroup select option { color: #111; }
+.dropdown { position: relative; display: inline-block; }
+.dropdown > button { border: 0; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 8px 8px 0; background: transparent; color: #fff; padding: 8px 11px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.dropdown-content { display: none; position: absolute; right: 0; background: #fff; color: var(--ink); min-width: 220px; border: 1px solid var(--line); box-shadow: 0 8px 22px rgba(17,42,66,.18); border-radius: 10px; z-index: 30; padding: 8px 0; max-height: 300px; overflow-y: auto; margin-top: 6px; }
+.dropdown-content label { display: block; padding: 7px 14px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.dropdown-content label:hover { background: #f2f8fc; }
+.dropdown-content hr { margin: 6px 0; border: none; border-top: 1px solid var(--line); }
+.dropdown.aberto .dropdown-content { display: block; }
+.fonte-status { margin-top: 10px; font-size: 11.5px; color: #bfe0eb; }
+.prog-linha .barra { height: 12px; border-radius: 8px; width: 380px; flex-basis: 380px; max-width: 60vw; }
+.prog-linha .barra-fill { background: linear-gradient(90deg, #16a5b8, #7ee0bc); }
+.top .progresso.erro .barra-fill { background: #e06a6a; }
+.top .log summary { font-size: 12px; font-weight: 700; color: #bfe0eb; }
+.top .log pre { background: rgba(0,0,0,.28); color: #e6f2f8; font: 11.5px/1.5 Consolas, "Courier New", monospace; }
+.nav { padding: 0 34px; background: #fff; border-bottom: 1px solid var(--line); display: flex; gap: 2px; overflow: auto; }
+.nav[hidden] { display: none; }
+.tab { border: 0; background: none; padding: 14px 18px; color: var(--muted); font-weight: 650; font-size: 14px; cursor: pointer; border-bottom: 3px solid transparent; white-space: nowrap; font-family: inherit; }
+.tab.active { color: var(--blue); border-bottom-color: var(--cyan); }
+.conteudo .orientacoes { border-radius: 12px; }
+#quadroRelatorio { background: var(--bg); min-height: calc(100vh - 230px); }
+.btn-principal { background: var(--navy); } .btn-principal:hover:not(:disabled) { background: var(--blue); }
+@media (max-width: 900px) { .top, .nav { padding-left: 16px; padding-right: 16px; } }
+
+.vazio-wrap { max-width: 1800px; width: 100%; margin: 0 auto; padding: 22px 34px 38px; }
+.vazio-wrap[hidden] { display: none; }
+.painel-vazio { background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 3px 12px rgba(17,42,66,.045); padding: 18px; }
+.painel-vazio h2 { font-size: 16px; margin: 0 0 3px; color: var(--navy); }
+.painel-vazio .dica { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+.vazio { padding: 34px; text-align: center; color: var(--muted); border: 1px dashed #b8c5cf; border-radius: 10px; background: #fafcfd; }
+.vazio b { color: var(--navy); }
+.esperados { margin: 16px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+.esperados li { margin-bottom: 5px; }
+.painel-vazio .rodape { text-align: left; margin: 12px 0 0; }
+.top .log { max-width: none; margin-top: 8px; }
+@media (max-width: 900px) { .vazio-wrap { padding-left: 16px; padding-right: 16px; } }
+
+/* ===== Visual simples: filtros em listas suspensas ===== */
+.filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 14px; }
+.fsel { display: flex; flex-direction: column; gap: 3px; font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .45px; color: #c8d6e5; transition: opacity .15s; }
+.fsel.inativo { opacity: .4; }
+.fsel select, .fsel .dropdown > button { min-width: 150px; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; background: rgba(255,255,255,.1); color: #fff; padding: 8px 10px; font: inherit; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; text-align: left; cursor: pointer; }
+.fsel select:disabled, .fsel .dropdown > button:disabled { cursor: default; opacity: .7; }
+.fsel select option { color: #111; }
+.dropdown-content { left: 0; right: auto; }
+.top h1 { margin-bottom: 0; }
+.top .progresso { margin-top: 12px; }
+
+/* ===== Compacto: título, filtros e abas ocupam menos espaço; a 1ª informação cabe na tela (1366×768) ===== */
+.top { padding: 8px 20px 8px; }
+.top-linha { gap: 6px 16px; }
+.top h1 { font-size: 15px; margin: 0; line-height: 1.25; }
+.eyebrow { font-size: 10px; letter-spacing: 1.2px; }
+.versao { font-size: 9.5px; padding: 0 7px; margin-left: 6px; }
+.btn-top { padding: 5px 10px; font-size: 12px; }
+.filtros { margin-top: 6px; gap: 6px 14px; align-items: center; }
+.fsel { flex-direction: row; align-items: center; gap: 6px; font-size: 9.5px; }
+.fsel select, .fsel .dropdown > button { min-width: 120px; padding: 4px 8px; font-size: 12px; }
+.top .progresso { margin-top: 6px; }
+.prog-linha .barra { height: 8px; }
+.fonte-status { margin-top: 4px; }
+.nav { padding: 0 20px; }
+.tab { padding: 7px 14px; font-size: 13px; }
+.vazio-wrap { padding: 12px 20px 16px; }
+.painel-vazio { padding: 12px 16px; }
+.painel-vazio h2 { font-size: 14px; }
+.painel-vazio .dica { margin-bottom: 8px; }
+.vazio { padding: 16px; }
+.esperados { margin-top: 10px; font-size: 12px; }
+.esperados li { margin-bottom: 3px; }
+.painel-vazio .rodape { margin-top: 8px; }
+
+/* ===== Cabeçalho no mesmo layout do DRE Unificado: título à esquerda, filtros e botões à direita, na mesma linha ===== */
+.top-linha { flex-wrap: nowrap; align-items: center; gap: 8px 14px; }
+.fonte-status[hidden] { display: none; }
+.ferramentas { flex: none; flex-wrap: nowrap; }
+.filtros { flex-wrap: nowrap; }
+.top-linha h1 { white-space: nowrap; }
+.fsel select, .fsel .dropdown > button { padding: 5px 6px; max-width: 102px; text-overflow: ellipsis; }
+.fsel > span { padding: 4px 5px; letter-spacing: .2px; font-size: 9px; }
+.top { padding-right: 14px; }
+.fsel .dropdown > button { white-space: nowrap; }
+.filtros { gap: 6px; }
+.ferramentas { gap: 6px; }
+.ferramentas button, .ferramentas .btn { padding: 5px 6px; font-size: 12px; white-space: nowrap; }
+.top-linha h1 { font-size: 14px; }
+
+.top-linha > div:first-child { flex: 0 1 auto; }
+.filtros { margin: 0; flex: 1 1 auto; justify-content: flex-end; gap: 6px 10px; align-items: center; }
+.fsel { flex-direction: row; align-items: center; gap: 0; border: 1px solid rgba(255,255,255,.38); border-radius: 9px; background: rgba(255,255,255,.07); position: relative; color: #d5e7ef; font-size: 9.5px; font-weight: 750; letter-spacing: .45px; text-transform: uppercase; }
+.fsel > span { padding: 4px 8px; }
+.fsel select, .fsel .dropdown > button { min-width: 0; border: 0; border-left: 1px solid rgba(255,255,255,.25); border-radius: 0 8px 8px 0; background: transparent; padding: 5px 9px; font-size: 12px; font-weight: 700; color: #fff; text-transform: none; letter-spacing: 0; }
+.fsel select { font-weight: 400; }
+.ferramentas { gap: 6px 10px; }
+.fonte-status { margin: 4px 0 0; font-size: 11px; }
+.top .progresso { margin-top: 4px; }
+/* o relatório ocupa o resto da tela e rola por dentro */
+body.relatorio-aberto { height: 100vh; overflow: hidden; }
+body.relatorio-aberto .conteudo { min-height: 0; }
+#quadroRelatorio { min-height: 0; }
+.filtros-top20 { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 0 0 8px; flex: none; }
+.filtros-top20 input { width: 100%; max-width: 340px; padding: 5px 10px; font: inherit; font-size: .82rem; border: 1px solid var(--line); border-radius: 8px; }
+.sup-top20 { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 600; color: var(--navy, #102840); }
+.sup-top20 select { font: inherit; font-weight: 400; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
+/* tempo estimado */
+.eta { margin-left: 14px; white-space: nowrap; font-weight: 700; color: #ffd166; font-variant-numeric: tabular-nums; }
+.eta[hidden] { display: none; }
+/* etapas da geração (gráficos, tabelas, KPIs) */
+.etapas { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: #C8D4EA; }
+.etapas[hidden] { display: none; }
+.etapas li { display: inline-flex; align-items: center; gap: 5px; }
+.etapas li span { font-weight: 800; }
+.etapas li.ok span { color: #7ee0bc; }
+.etapas li.atual { color: #fff; font-weight: 700; }
+.etapas li.atual span { color: #ffd166; animation: pulsa 1s infinite alternate; }
+@keyframes pulsa { from { opacity: .35; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-linha">
+    <div>
+      <div class="eyebrow">Águas do Rio • Relatório Executivo <span class="versao" id="versao">v51</span></div>
+      <h1 id="titulo">Análise de Faturamento — Água e Esgoto</h1>
+    </div>
+    <div class="filtros" id="filtros">
+      <label class="fsel" id="fgSup"><span>Superintendência</span><select id="selSupTop" disabled><option>—</option></select></label>
+      <label class="fsel" id="fgRef" title="Escolha até duas planilhas de orçado para comparar (Δ % e Δ R$)"><span>Comparar</span><select id="selRef1Top" disabled><option>—</option></select><select id="selRef2Top" disabled><option>—</option></select></label>
+      <label class="fsel" id="fgMes"><span>Mês</span><select id="selMesTop" disabled><option>—</option></select></label>
+      <div class="fsel" id="fgGrupo"><span>Grupo</span>
+        <div class="dropdown" id="ddGrupo"><button type="button" id="btnGrupo" disabled>Todos ▾</button><div class="dropdown-content" id="listaGrupos"></div></div></div>
+    </div>
+    <div class="ferramentas">
+      <span id="downloads" style="display:contents"></span>
+      <button type="button" class="btn-top" id="btnPasta">📁 Conectar pasta</button>
+      <a class="btn-top" href="https://raniere3000-tech.github.io/bookcomercial/">🏠 Menu</a>
+      <button type="button" class="btn-top" id="btnAtualizar" hidden>↻ Atualizar</button>
+      <button type="button" class="btn-top" id="btnPdf" hidden title="PDF executivo conforme os filtros da tela">📄 Executivo</button>
+      <input type="file" id="inputPasta" webkitdirectory directory multiple hidden>
+    </div>
+  </div>
+  <div class="fonte-status" id="fonteStatus">Nenhuma pasta conectada.</div>
+  <div class="progresso" id="progresso" hidden>
+    <div class="prog-linha"><div class="barra"><div class="barra-fill" id="barraFill"></div></div><b id="statusPct">0%</b><span id="statusTexto">Preparando…</span><span class="eta" id="statusEta" hidden></span></div>
+    <p class="nota" id="statusNota"></p>
+    <ol class="etapas" id="listaEtapas" hidden aria-live="polite"></ol>
+    <div class="arquivos" id="listaArquivos" hidden></div>
+    <details class="log">
+      <summary>Detalhes da leitura</summary>
+      <div class="log-ferramentas"><button type="button" id="btnCopiarLog">Copiar detalhes</button></div>
+      <pre id="logExecucao">Nenhuma leitura realizada ainda.</pre>
+    </details>
+  </div>
+</header>
+
+<nav class="nav" id="nav" aria-label="Páginas do relatório">
+  <button class="tab active" data-view="resumo" type="button">Resumo</button>
+  <button class="tab" data-view="tabelas" type="button">Diretas</button>
+  <button class="tab" data-view="analise" type="button">Análise</button>
+  <button class="tab" data-view="indiretas" type="button">Indiretas</button>
+  <button class="tab" data-view="forecast" type="button">Forecast</button>
+  <button class="tab" data-view="dre" type="button">DRE</button>
+  <button class="tab" data-view="dados" type="button">Dados</button>
+</nav>
+
+<main class="conteudo" id="inicio">
+  <div class="vazio-wrap" id="vazioWrap">
+    <div class="painel-vazio">
+      <h2 id="vazioTitulo">DRE: orçado × realizado</h2>
+      <div class="dica" id="vazioDica">Realizado do mês contra o orçado RF e o orçado SUP, por superintendência</div>
+      <div class="vazio"><b>Sem dados para o período.</b><br>Conecte a pasta com os arquivos (fatura, consumo, cronograma, serviço avulso e orçados RF) usando o botão <b>📁 Conectar pasta</b>.</div>
+      <ul class="esperados">
+        <li><b>Fatura</b>, <b>consumo</b> (com o mês no nome, ex.: <code>Consumo 09-2026.csv</code>) e <b>cronograma</b> — CSV, XLSX ou XLS, do mês atual e do anterior.</li>
+        <li><b>Serviço avulso</b> (nome com "avulso") para as indiretas; <b>RF</b> (ex.: <code>RF01T26.xlsx</code>) e <b>RF SUP</b> para o orçado.</li>
+        <li>Tudo é processado no seu navegador; nenhum arquivo é enviado para servidor. Na primeira vez, o carregamento leva cerca de 1 minuto.</li>
+      </ul>
+      <p class="rodape"><a href="acompanhamento_faturamento.py" download>Baixar o script Python</a> ·
+        <button type="button" class="link-btn" id="btnLimparCache" title="Os arquivos já lidos ficam guardados no navegador para a próxima análise ser mais rápida. Apagar força a leitura completa.">Limpar arquivos guardados</button></p>
+    </div>
+  </div>
+  <iframe id="quadroRelatorio" title="Relatório comparativo de água e esgoto" hidden></iframe>
+</main>
+
+<div class="etapa-top20" id="etapaTop20" hidden>
+  <div class="painel-top20">
+    <h2 id="top20Titulo"><span class="badge">Etapa 2 · Conferência</span><span id="top20TituloTexto"></span></h2>
+    <p class="lead"><span id="textoFiltro"></span>Maiores <b>Consumo Faturado</b> do mês atual. Se quiser, altere o consumo ou o valor total (água + esgoto) de algum cliente. Ao aplicar, toda a análise e a comparação usam os valores alterados. Os arquivos da pasta não são modificados.</p>
+    <p class="nota" id="notaLeitura" hidden style="flex:none;margin:0 0 6px;font-size:.78rem;color:var(--muted);"></p>
+    <p class="nota" id="avisoTop20" hidden style="flex:none;color:var(--laranja-texto);font-weight:600;font-size:.8rem;margin:0 0 6px;">A coluna "Situacao Conta" não foi encontrada nos arquivos, então abaixo aparece o Top 20 de maior consumo de todas as contas.</p>
+    <div class="filtros-top20">
+      <input type="search" id="buscaTop20" placeholder="Filtrar por ligação, cliente ou grupo…" aria-label="Filtrar clientes">
+      <label class="sup-top20">Superintendência <select id="supTop20" aria-label="Filtrar por superintendência"><option value="">Todas</option></select></label>
+      <label class="sup-top20">Categoria <select id="catTop20" aria-label="Filtrar por categoria"><option value="">Todas</option></select></label>
+      <span class="nota-tarifa" id="notaTarifa"></span>
+    </div>
+    <div class="corpo-top20">
+    <div class="tabela-rolagem">
+      <table class="tabela-top20">
+        <thead><tr>
+          <th>#</th><th class="marcar"><input type="checkbox" id="chkTodosTop20" title="Marcar todas as contas visíveis" aria-label="Marcar todas as contas visíveis"></th><th>Ligação</th><th>Grupo</th><th>SUP</th><th>Cliente</th><th>Categoria</th>
+          <th class="num" title="Quantidade de economias da ligação no mês">Economias</th>
+          <th class="num" id="thConsumoAnt" title="Consumo Faturado no mês anterior">Consumo mês ant.</th>
+          <th class="num ordenavel" data-ordem="consumo" tabindex="0" title="Ordenar">Consumo (m³) <span class="seta"></span></th>
+          <th class="num" id="thValorAnt" title="Valor total no mês anterior">Valor mês ant.</th>
+          <th class="num ordenavel" data-ordem="valor" tabindex="0" title="Ordenar">Valor total (R$) <span class="seta"></span></th>
+          <th class="num" title="Consumo mínimo da categoria × economias">Mín. (m³)</th>
+          <th class="num" title="Valor da conta (água + esgoto) no consumo mínimo, pela estrutura tarifária">Mín. sugerido (R$)</th>
+        </tr></thead>
+        <tbody id="corpoTop20"></tbody>
+      </table>
+    </div>
+    <aside class="quadro-grupos" aria-label="Totais por grupo de leitura">
+      <h3>Totais por grupo de leitura</h3>
+      <p id="notaGrupos">Soma de todas as ligações de cada grupo no mês, já com as alterações feitas na tabela (grupo alterado em laranja). Os filtros da lista não mudam este quadro. Água em análise acima de <span id="limiteDestaque">R$ 100.000</span> em vermelho.</p>
+      <div class="rolagem-grupos">
+        <table class="tabela-grupos">
+          <thead>
+            <tr><th rowspan="2">Grupo</th><th colspan="2" class="grp">Consumo (m³)</th><th colspan="2" class="grp">Faturamento (R$)</th>
+                <th rowspan="2" class="num" id="thDeltaGrupo" title="Faturamento do mês contra o mês anterior">Δ fat.</th>
+                <th colspan="2" class="grp" title="Valor das contas do grupo que não estão liberadas (já com as alterações feitas na tabela)">Em análise (R$)</th></tr>
+            <tr><th class="num" id="thGrpConsAt">Atual</th><th class="num" id="thGrpConsAnt">Anterior</th>
+                <th class="num" id="thGrpFatAt">Atual</th><th class="num" id="thGrpFatAnt">Anterior</th>
+                <th class="num">Água</th><th class="num">Esgoto</th></tr>
+          </thead>
+          <tbody id="corpoGrupos"></tbody>
+          <tfoot id="totalGrupos"></tfoot>
+        </table>
+      </div>
+    </aside>
+    </div>
+    <div class="acoes-top20">
+      <button type="button" class="btn btn-principal" id="btnAplicar">Aplicar alterações e gerar relatório</button>
+      <button type="button" class="btn btn-secundario" id="btnMinimoMarcadas" title="Coloca o consumo mínimo nas contas marcadas e recalcula o valor pela tarifa">Aplicar mínimo nas marcadas</button>
+      <button type="button" class="btn btn-secundario" id="btnRestaurar">Restaurar originais</button>
+      <button type="button" class="btn btn-secundario" id="btnPular">Pular, usar valores originais</button>
+      <span class="contador" id="contadorTop20"></span>
+    </div>
+  </div>
+</div>
+
+<script src="tarifas_site.js?v=51"></script>
+<script>
+(() => {
+  const VERSAO_SITE = "v51-20261009"; // muda a cada alteração: o selo do cabeçalho é derivado daqui
+  try { document.getElementById("versao").textContent = VERSAO_SITE.split("-")[0]; } catch (e) {}
+  const EXTENSOES = [".csv", ".xlsx", ".xls"];
+  const SAIDAS = {
+    "Relatorio_Comparativo.html": { rotulo: "", tipo: "text/html" },
+    "Top100_Quedas_Consumo.xlsx": { rotulo: "Baixar Top 100 (Excel)", tipo: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    "Base_Compilada_HISTORICO.xlsx": { rotulo: "", tipo: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  };
+  const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  const $ = (id) => document.getElementById(id);
+  const btnPasta = $("btnPasta"), btnAtualizar = $("btnAtualizar");
+  const inputPasta = $("inputPasta"), progresso = $("progresso");
+
+  let worker = null;
+  let pastaHandle = null;
+  let rodando = false;
+  let urlsCriadas = [];
+
+  const ehEntrada = (nome) =>
+    EXTENSOES.some((ext) => nome.toLowerCase().endsWith(ext)) && !(nome in SAIDAS) && !nome.startsWith("~$");
+
+  const nomeMes = (ref) => {
+    if (!ref || !ref.includes("/")) return ref || "";
+    const [m, a] = ref.split("/");
+    return `${MESES[parseInt(m, 10) - 1]}/${a}`;
+  };
+
+  function pegaWorker() {
+    if (!worker) {
+      worker = new Worker("analisador.worker.js?v=" + VERSAO_SITE);
+      worker.onmessage = (e) => trataMensagem(e.data);
+      worker.onerror = (e) => {
+        worker = null;
+        mostraErro("Não foi possível carregar o Python no navegador. Verifique a internet e tente de novo.", e.message || "");
+      };
+    }
+    return worker;
+  }
+
+  // Etapas da geração: o item em andamento e os já concluídos (gráficos, tabelas, KPIs, abas)
+  let etapas = [];
+  function limpaEtapas() { etapas = []; $("listaEtapas").innerHTML = ""; $("listaEtapas").hidden = true; }
+  function registraEtapa(texto, concluir) {
+    if (!/^(Criando|Calculando|Montando)/.test(texto) && !concluir) return;
+    const ultima = etapas[etapas.length - 1];
+    if (ultima && !ultima.ok && ultima.texto !== texto) ultima.ok = true;
+    if (!concluir && (!ultima || ultima.texto !== texto)) etapas.push({ texto, ok: false });
+    if (concluir && ultima) ultima.ok = true;
+    const lista = $("listaEtapas");
+    lista.hidden = !etapas.length;
+    lista.innerHTML = etapas.slice(-8).map((e) =>
+      `<li class="${e.ok ? "ok" : "atual"}"><span>${e.ok ? "✓" : "●"}</span>${escapa(e.texto)}</li>`).join("");
+  }
+
+  // ===== Tempo estimado para terminar =====
+  // Fase 1: ler a pasta até a conferência do Top 20 (0–52%). Fase 2: gerar o relatório (52–100%).
+  // Usa o tempo da última execução neste navegador (quanto cada faixa da barra levou), ajustado ao ritmo de agora;
+  // na primeira vez, sem histórico, projeta pelo ritmo da própria barra. O valor conta os segundos entre as mensagens.
+  const ETA_LS = "faturamento_eta_v1";
+  let eta = { fase: null, t0: null, pontos: [], fim: null, timer: null };
+  const etaHistorico = () => { try { return JSON.parse(localStorage.getItem(ETA_LS) || "{}"); } catch (e) { return {}; } };
+  function iniciaEta(fase) {
+    paraEta();
+    eta = { fase, t0: null, pontos: [], fim: null, timer: setInterval(mostraEta, 1000) };
+  }
+  function paraEta() {
+    if (eta.timer) clearInterval(eta.timer);
+    eta.timer = null; eta.fim = null;
+    $("statusEta").hidden = true;
+  }
+  function salvaEta() {
+    if (eta.fase && eta.pontos.length > 2) {
+      const h = etaHistorico(); h[eta.fase] = eta.pontos.filter((_, i, a) => i % Math.ceil(a.length / 60) === 0 || i === a.length - 1);
+      try { localStorage.setItem(ETA_LS, JSON.stringify(h)); } catch (e) { /* sem armazenamento */ }
+    }
+    paraEta();
+  }
+  function tempoNoHistorico(pts, p) {           // segundos que a execução anterior levou até chegar em p%
+    if (!pts || pts.length < 2 || p < pts[0][0]) return null;
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i][0] >= p) {
+        const [p0, t0] = pts[i - 1], [p1, t1] = pts[i];
+        return p1 === p0 ? t1 : t0 + (t1 - t0) * (p - p0) / (p1 - p0);
+      }
+    }
+    return pts[pts.length - 1][1];
+  }
+  function atualizaEta(p) {
+    if (!eta.fase) return;
+    const agora = performance.now();
+    if (eta.t0 === null) eta.t0 = agora;
+    const decorrido = (agora - eta.t0) / 1000;
+    eta.pontos.push([p, Math.round(decorrido * 10) / 10]);
+    const [ini, fim] = eta.fase === "f1" ? [0, 52] : [52, 100];
+    let resta = null;
+    const h = etaHistorico()[eta.fase];
+    const tp = tempoNoHistorico(h, p);
+    if (h && tp !== null && tp > 2 && decorrido > 2) {
+      const total = h[h.length - 1][1], ritmo = Math.min(3, Math.max(0.33, decorrido / tp));
+      resta = Math.max(0, (total - tp) * ritmo);
+    } else {
+      const feito = (p - ini) / (fim - ini);
+      if (feito > 0.06 && decorrido > 3) resta = decorrido * (1 - feito) / feito;
+    }
+    if (resta === null) return;
+    const novoFim = agora + resta * 1000;
+    eta.fim = eta.fim === null ? novoFim : eta.fim * 0.6 + novoFim * 0.4;   // suaviza saltos entre mensagens
+    mostraEta();
+  }
+  function mostraEta() {
+    const el = $("statusEta");
+    if (!eta.fim) { el.hidden = true; return; }
+    const s = Math.max(0, Math.round((eta.fim - performance.now()) / 1000));
+    const alvo = eta.fase === "f1" ? " para a conferência" : " para o relatório";
+    if (s < 5) { el.textContent = "⏱ quase pronto"; el.hidden = false; return; }
+    const m = Math.floor(s / 60), r = Math.round((s % 60) / 5) * 5;
+    const txt = s < 60 ? `~${Math.ceil(s / 5) * 5} s` : r === 60 ? `~${m + 1} min` : `~${m} min ${String(r).padStart(2, "0")} s`;
+    el.textContent = `⏱ faltam ${txt}${alvo}`;
+    el.hidden = false;
+  }
+
+  function setStatus(texto, pct) {
+    registraEtapa(texto, texto === "Finalizado" || texto === "Relatório gerado");
+    $("statusTexto").textContent = texto;
+    if (typeof pct === "number") {
+      const p = Math.max(0, Math.min(100, pct));
+      $("barraFill").style.width = p + "%";
+      $("statusPct").textContent = Math.round(p) + "%";
+    }
+  }
+
+  function bloqueia(sim) {
+    rodando = sim;
+    btnPasta.disabled = sim;
+    btnAtualizar.disabled = sim;
+  }
+
+  // resumo da leitura: quantos arquivos foram lidos agora e quantos vieram de análises anteriores (guardados no navegador)
+  let ultimaLeitura = "";
+  function mostraLeitura(l) {
+    if (!l) return;
+    const partes = [`Lidos do arquivo agora: ${l.lidos || 0}`];
+    if (l.reaproveitados) partes.push(`reaproveitados (já lidos antes): ${l.reaproveitados}`);
+    if (l.guardadoMB != null) partes.push(`${String(l.guardadoMB).replace(".", ",")} MB guardados no navegador`);
+    const texto = partes.join(" · ");
+    ultimaLeitura = texto;
+    $("statusNota").textContent = texto;
+    $("notaLeitura").textContent = "♻️ " + texto + (l.reaproveitados ? " — só os arquivos novos ou alterados foram abertos." : "");
+    $("notaLeitura").hidden = false;
+    $("logExecucao").textContent += "\n" + texto;
+  }
+
+  function mostraErro(resumo, detalhe) {
+    fechaRelatorio();
+    progresso.hidden = false;
+    progresso.classList.add("erro");
+    setStatus("Não foi possível gerar o relatório");
+    $("statusNota").textContent = resumo;
+    if (detalhe) $("logExecucao").textContent += "\n" + detalhe;
+    progresso.querySelector("details").open = true;
+    bloqueia(false);
+  }
+
+  function trataMensagem(msg) {
+    if (msg.tipo === "etapa") setStatus(msg.texto);
+    else if (msg.tipo === "progresso") { setStatus(msg.texto, msg.pct); atualizaEta(msg.pct); }
+    else if (msg.tipo === "log") {
+      const log = $("logExecucao");
+      log.textContent += msg.linha + "\n";
+      log.scrollTop = log.scrollHeight;
+    }
+    else if (msg.tipo === "erro") { paraEta(); mostraErro(msg.resumo, msg.detalhe); }
+    else if (msg.tipo === "top20") { salvaEta(); mostraLeitura(msg.dados.leitura); mostraTop20(msg.dados); }
+    else if (msg.tipo === "cacheLimpo") { $("statusNota").textContent = "Arquivos guardados apagados: a próxima análise lê todos os arquivos de novo."; }
+    else if (msg.tipo === "concluido") { salvaEta(); abreRelatorio(msg); }
+  }
+
+  function abreRelatorio({ saidas, refAtual, refAnterior }) {
+    setStatus("Relatório gerado", 100);
+    progresso.hidden = true;                      // pronto: some a barra e as informações
+    $("fonteStatus").hidden = true;
+    bloqueia(false);
+
+    urlsCriadas.forEach(URL.revokeObjectURL);
+    urlsCriadas = [];
+    const downloads = $("downloads");
+    downloads.innerHTML = "";
+    let htmlRelatorio = null;
+
+    for (const nome of Object.keys(SAIDAS)) {
+      const saida = saidas.find((s) => s.nome === nome);
+      if (!saida) continue;
+      const info = SAIDAS[nome];
+      if (nome === "Relatorio_Comparativo.html") {
+        htmlRelatorio = new TextDecoder("utf-8").decode(saida.conteudo);
+      }
+      continue;                                    // o download do Top 100 agora fica dentro do relatório
+      const url = URL.createObjectURL(new Blob([saida.conteudo], { type: info.tipo }));
+      urlsCriadas.push(url);
+      const a = document.createElement("a");
+      a.className = "btn-top";
+      a.href = url;
+      a.download = nome;
+      a.textContent = info.rotulo;
+      downloads.appendChild(a);
+    }
+
+    if (!htmlRelatorio) {
+      mostraErro("A análise terminou, mas o relatório HTML não foi gerado.");
+      return;
+    }
+
+    const periodo = refAtual ? `${nomeMes(refAtual)} vs ${nomeMes(refAnterior)}` : "";
+    $("titulo").textContent = periodo ? `Faturamento — ${periodo}` : "Análise de Faturamento — Água e Esgoto";
+    document.title = periodo ? `Relatório ${periodo}` : "Relatório";
+    btnAtualizar.hidden = !pastaHandle;
+
+    // o cabeçalho do relatório repete o do site; aqui ele some (no arquivo/PDF continua)
+    $("quadroRelatorio").srcdoc = htmlRelatorio;
+    $("quadroRelatorio").hidden = false;
+    $("vazioWrap").hidden = true;
+    document.body.classList.add("relatorio-aberto");
+  }
+
+  function fechaRelatorio() {
+    $("etapaTop20").hidden = true;
+    $("quadroRelatorio").hidden = true;
+    $("btnPdf").hidden = true;
+    $("vazioWrap").hidden = false;
+    document.body.classList.remove("relatorio-aberto", "top20-aberto");
+    document.title = "Análise de Faturamento — Água e Esgoto";
+  }
+
+  // Lê a pasta E as subpastas. O nome enviado leva o caminho ("Leste/Consumo.csv"): arquivos com o mesmo nome em
+  // pastas diferentes não se sobrescrevem. Pastas ocultas (".algo") ficam de fora.
+  const MAX_NIVEIS = 6;
+  async function lerPastaHandle(handle, prefixo = "", nivel = 0) {
+    const lidos = [];
+    for await (const entrada of handle.values()) {
+      if (entrada.name.startsWith(".")) continue;
+      if (entrada.kind === "file" && ehEntrada(entrada.name)) {
+        const arq = await entrada.getFile();
+        // o conteúdo só é lido no worker, e só para arquivos novos/alterados (os já lidos antes vêm do navegador)
+        lidos.push({ nome: prefixo + arq.name, arquivo: arq, tamanho: arq.size, modificado: arq.lastModified });
+      } else if (entrada.kind === "directory" && nivel < MAX_NIVEIS) {
+        lidos.push(...await lerPastaHandle(entrada, prefixo + entrada.name + "/", nivel + 1));
+      }
+    }
+    return lidos;
+  }
+
+  async function lerListaArquivos(lista) {
+    const lidos = [];
+    for (const arq of lista) {
+      const partes = (arq.webkitRelativePath || arq.name).split("/");
+      const relativo = partes.length > 1 ? partes.slice(1) : partes;          // tira o nome da pasta escolhida
+      if (relativo.length > MAX_NIVEIS + 1 || relativo.some((p) => p.startsWith("."))) continue;
+      if (!ehEntrada(arq.name)) continue;
+      lidos.push({ nome: relativo.join("/"), arquivo: arq, tamanho: arq.size, modificado: arq.lastModified });
+    }
+    return lidos;
+  }
+
+  function iniciaExecucao() {
+    fechaRelatorio();
+    $("fonteStatus").hidden = false;
+    progresso.hidden = false;
+    progresso.classList.remove("erro");
+    $("logExecucao").textContent = "";
+    $("listaArquivos").innerHTML = "";
+    limpaEtapas();
+    iniciaEta("f1");
+    $("statusNota").textContent = worker ? "Lendo os arquivos da pasta…" : "Carregando o Python no navegador. Na primeira vez pode levar cerca de 1 minuto.";
+    setStatus("Lendo a pasta…", 0);
+    bloqueia(true);
+    pegaWorker();                                  // já começa a carregar o Python
+  }
+
+  function enviaParaAnalise(arquivos, nomePasta) {
+    if (!arquivos.length) {
+      mostraErro(`Nenhum arquivo CSV, XLSX ou XLS encontrado na pasta "${nomePasta}".`);
+      return;
+    }
+    const lista = $("listaArquivos");
+    arquivos.forEach((a) => {
+      const tag = document.createElement("span");
+      tag.className = "arquivo";
+      tag.textContent = a.nome;
+      lista.appendChild(tag);
+    });
+    $("statusNota").textContent = `${arquivos.length} arquivo(s) encontrado(s) em "${nomePasta}".`;
+    pegaWorker().postMessage({ fase: "preparar", arquivos });
+  }
+
+  // Guarda a pasta conectada no navegador (IndexedDB) para reabri-la sozinho nas próximas visitas
+  const idb = {
+    open() { return new Promise((res, rej) => { const r = indexedDB.open("faturamento", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+    async get(k) { try { const db = await this.open(); return await new Promise((res) => { const q = db.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } },
+    async set(k, v) { try { const db = await this.open(); await new Promise((res) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) {} },
+  };
+  const setFonte = (html) => { $("fonteStatus").innerHTML = html; };
+
+  async function analisaHandle(handle) {
+    iniciaExecucao();
+    try {
+      if ((await handle.queryPermission({ mode: "read" })) !== "granted" &&
+          (await handle.requestPermission({ mode: "read" })) !== "granted") {
+        mostraErro("O acesso à pasta não foi liberado.");
+        return;
+      }
+      enviaParaAnalise(await lerPastaHandle(handle), handle.name);
+    } catch (e) {
+      mostraErro("Não foi possível ler a pasta.", String(e));
+    }
+  }
+
+  async function escolhePasta() {
+    if (rodando) return;
+    if ("showDirectoryPicker" in window) {
+      try {
+        const handle = await window.showDirectoryPicker({ id: "faturamento", mode: "read" });
+        pastaHandle = handle;
+        idb.set("pasta", handle);
+        setFonte(`Pasta conectada: <b>${handle.name}</b>`);
+        btnAtualizar.hidden = false;
+        btnAtualizar.title = `Reler a pasta "${handle.name}"`;
+        analisaHandle(handle);
+      } catch (e) {
+        if (e.name !== "AbortError") mostraErro("Não foi possível abrir a pasta.", String(e));
+      }
+    } else {
+      inputPasta.value = "";
+      inputPasta.click();
+    }
+  }
+
+  function atualiza() {
+    if (!rodando && pastaHandle) analisaHandle(pastaHandle);
+  }
+
+
+  // ===== Etapa de conferência do Top 20 =====
+  let linhasTop20 = [];
+  const fmtNum = (v, dec) => v.toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+  function lerNumero(texto) {
+    let t = String(texto).trim().replace(/\s/g, "").replace(/^R\$/i, "");
+    if (t === "") return NaN;
+    if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+    else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, "");
+    return /^-?\d+(\.\d+)?$/.test(t) ? parseFloat(t) : NaN;
+  }
+
+  let gruposTop20 = [];
+  let conf = { tarifas: {}, percentualEsgoto: 1, limite: 100000, comSituacao: false };   // vem do Python (preparar)
+
+  // valor (água, esgoto) da conta pela tarifa para um consumo; null se a categoria não estiver na estrutura
+  const contaPelaTarifa = (l, consumo) =>
+    Tarifas.valorConta(conf.tarifas, l.categoria, consumo, l.economias, l.tem_esgoto, conf.percentualEsgoto);
+  const minimoDaConta = (l) => Tarifas.minimoM3(conf.tarifas, l.categoria, l.economias);
+  const inputDe = (tr, campo) => tr.querySelector(`input[data-campo="${campo}"]`);
+
+  function mostraTop20({ refAtual, refAnterior, linhas, colunaSituacao, grupos, tarifas, fonteTarifas, percentualEsgoto, limiteDestaque }) {
+    linhasTop20 = linhas;
+    gruposTop20 = grupos || [];
+    conf = { tarifas: tarifas || {}, percentualEsgoto: percentualEsgoto == null ? 1 : percentualEsgoto,
+             limite: limiteDestaque || 100000, comSituacao: !!colunaSituacao };
+    $("limiteDestaque").textContent = "R$ " + fmtNum(conf.limite, 0);
+    $("notaTarifa").textContent = `Tarifas: ${fonteTarifas || "padrão do sistema"} · esgoto = ${fmtNum(conf.percentualEsgoto * 100, 0)}% da água`;
+    const mesAnt = refAnterior ? nomeMes(refAnterior) : "mês anterior";
+    const curto = (r) => { const [m, a] = String(r).split("/");            // "10/2026" → "Out/26"
+      return ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][+m - 1] + "/" + String(a).slice(-2); };
+    const antCurto = refAnterior ? curto(refAnterior) : "mês ant.";              // títulos curtos: a lista cabe em notebook
+    $("thConsumoAnt").textContent = `Consumo ${antCurto}`;
+    $("thConsumoAnt").title = `Consumo Faturado em ${mesAnt}`;
+    $("thValorAnt").textContent = `Valor ${antCurto}`;
+    $("thValorAnt").title = `Valor total em ${mesAnt}`;
+    $("thDeltaGrupo").title = `Faturamento do mês contra ${mesAnt}`;
+    [["thGrpConsAt", refAtual], ["thGrpFatAt", refAtual], ["thGrpConsAnt", refAnterior], ["thGrpFatAnt", refAnterior]]
+      .forEach(([id, r]) => { if (r) $(id).textContent = curto(r); });
+    progresso.hidden = true;
+    $("top20TituloTexto").textContent = colunaSituacao
+      ? `Clientes em análise — ${nomeMes(refAtual)} (${linhas.length})`
+      : `Top 20 clientes com maior consumo — ${nomeMes(refAtual)}`;
+    $("avisoTop20").hidden = !!colunaSituacao;
+    $("textoFiltro").textContent = colunaSituacao ? "Aparecem todos os clientes com Situação Conta = EM ANALISE. " : "";
+    $("buscaTop20").value = "";
+    const opcoes = (valores, campo) => `<option value="">Todas (${linhas.length})</option>` +
+      valores.map((s) => `<option value="${escapa(s)}">${escapa(s)} (${linhas.filter((l) => (l[campo] || "SEM " + campo.toUpperCase()) === s).length})</option>`).join("");
+    const sups = Array.from(new Set(linhas.map((l) => l.sup || "SEM SUP"))).sort((a, b) => (a === "SEM SUP") - (b === "SEM SUP") || a.localeCompare(b));
+    $("supTop20").innerHTML = opcoes(sups, "sup");
+    const cats = Array.from(new Set(linhas.map((l) => l.categoria || "SEM CATEGORIA"))).sort((a, b) => a.localeCompare(b));
+    $("catTop20").innerHTML = opcoes(cats, "categoria");
+    $("chkTodosTop20").checked = false;
+    const corpo = $("corpoTop20");
+    corpo.innerHTML = "";
+    linhas.forEach((l, i) => {
+      const tr = document.createElement("tr");
+      const cel = (txt, cls) => { const td = document.createElement("td"); td.textContent = txt; if (cls) td.className = cls; return td; };
+      const celCategoria = (c) => { const td = cel(c || "—", "cat"); td.title = c || ""; return td; };
+      const celCliente = cel(l.cliente, "cli");
+      celCliente.title = l.cliente;                            // nome inteiro ao passar o mouse (a célula corta nomes longos)
+      const celMarcar = cel("", "marcar");
+      const chk = document.createElement("input");
+      chk.type = "checkbox"; chk.className = "chk-conta"; chk.setAttribute("aria-label", `Marcar a ligação ${l.ligacao}`);
+      celMarcar.appendChild(chk);
+      tr.append(cel(i + 1), celMarcar, cel(l.ligacao), cel(l.grupo), cel(l.sup || "—", "cat"), celCliente, celCategoria(l.categoria),
+        cel(l.economias == null ? "—" : fmtNum(Math.abs(l.economias) < 0.5 ? 0 : l.economias, 0), "num"));
+      const semSinal = (v, dec) => fmtNum(Math.abs(v) < 0.5 * Math.pow(10, -dec) ? 0 : v, dec);    // evita "-0"
+      const ant = { consumo: l.consumo_ant == null ? "—" : semSinal(l.consumo_ant, 0), valor: l.valor_ant == null ? "—" : semSinal(l.valor_ant, 2) };
+      [["consumo", 0], ["valor", 2]].forEach(([campo, dec]) => {
+        tr.appendChild(cel(ant[campo], "num ant"));                 // mês anterior, ao lado do campo editável
+        const td = document.createElement("td");
+        td.className = "num";
+        const inp = document.createElement("input");
+        inp.type = "text"; inp.inputMode = "decimal";
+        inp.value = fmtNum(l[campo], dec);
+        inp.dataset.indice = i; inp.dataset.campo = campo; inp.dataset.dec = dec;
+        inp.setAttribute("aria-label", `${campo === "consumo" ? "Consumo Faturado" : "Valor total"} da ligação ${l.ligacao}`);
+        // consumo digitado: o valor é recalculado pela tarifa (água + esgoto); valor digitado: vale o que foi digitado
+        inp.addEventListener("input", () => { if (campo === "consumo") recalculaValor(tr); else inp.classList.remove("recalculado"); atualizaContador(); });
+        inp.addEventListener("blur", () => {
+          const n = lerNumero(inp.value);
+          if (!Number.isNaN(n)) inp.value = fmtNum(n, dec);
+          atualizaContador();
+        });
+        const orig = document.createElement("span");
+        orig.className = "orig"; orig.textContent = "original: " + fmtNum(l[campo], dec);
+        inp.title = orig.textContent;
+        td.append(inp, orig);
+        tr.appendChild(td);
+      });
+      // mínimo sugerido: consumo mínimo da categoria × economias e o valor da conta nesse consumo
+      const minimo = minimoDaConta(l), contaMin = minimo == null ? null : contaPelaTarifa(l, minimo);
+      tr.appendChild(cel(minimo == null ? "—" : fmtNum(minimo, 0), "num"));
+      const celSug = cel(contaMin == null ? "—" : fmtNum(contaMin.agua + contaMin.esgoto, 2), "num sug");
+      if (contaMin == null) celSug.title = `Categoria "${l.categoria || "—"}" sem estrutura tarifária: não dá para sugerir o mínimo.`;
+      else {
+        celSug.title = `Água R$ ${fmtNum(contaMin.agua, 2)}` + (l.tem_esgoto ? ` + esgoto R$ ${fmtNum(contaMin.esgoto, 2)}` : " (sem esgoto)");
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "btn-min"; b.textContent = "Aplicar";
+        b.title = "Usar o consumo mínimo nesta conta (o valor é recalculado pela tarifa)";
+        b.addEventListener("click", () => { aplicaMinimo(tr); atualizaContador(); });
+        celSug.appendChild(b);
+      }
+      tr.appendChild(celSug);
+      tr.dataset.indice = i;
+      corpo.appendChild(tr);
+    });
+    filtraTop20();
+    ordenaTabela("valor", true);
+    atualizaContador();
+    $("etapaTop20").hidden = false;
+    document.body.classList.add("top20-aberto");
+    $("etapaTop20").scrollTop = 0;
+  }
+
+  // consumo da linha → valor pela tarifa (se a categoria tiver estrutura); marca o campo como recalculado
+  function recalculaValor(tr) {
+    const l = linhasTop20[+tr.dataset.indice], n = lerNumero(inputDe(tr, "consumo").value), inpValor = inputDe(tr, "valor");
+    if (Number.isNaN(n) || n < 0) return;
+    const c = contaPelaTarifa(l, n);
+    if (c == null) return;                                    // sem tarifa da categoria: o valor fica como está
+    inpValor.value = fmtNum(c.agua + c.esgoto, 2);
+    inpValor.classList.add("recalculado");
+    inpValor.title = `Recalculado pela tarifa: água R$ ${fmtNum(c.agua, 2)}` + (l.tem_esgoto ? ` + esgoto R$ ${fmtNum(c.esgoto, 2)}` : "")
+      + ` · original: ${fmtNum(l.valor, 2)}`;
+  }
+
+  function aplicaMinimo(tr) {
+    const l = linhasTop20[+tr.dataset.indice], minimo = minimoDaConta(l);
+    if (minimo == null || contaPelaTarifa(l, minimo) == null) return false;
+    inputDe(tr, "consumo").value = fmtNum(minimo, 0);
+    recalculaValor(tr);
+    return true;
+  }
+
+  // Lê a tabela; devolve { ajustes, invalido }
+  // alterado = diferente do original COMO ELE APARECE no campo (54,7 m³ aparece 55: deixar 55 não é alteração)
+  const alterou = (n, original, dec) => Math.abs(n - Number(original.toFixed(dec))) > (dec ? 0.004 : 1e-9);
+
+  /** Estado de uma linha: consumo e valor atuais, se mudou, e o valor novo de água e de esgoto.
+   *  Se o valor é o da tarifa para o consumo da linha, água e esgoto saem da tarifa; senão (valor digitado),
+   *  o total é repartido na proporção original (como o Python faz). */
+  function estadoLinha(tr) {
+    const l = linhasTop20[+tr.dataset.indice], ic = inputDe(tr, "consumo"), iv = inputDe(tr, "valor");
+    const consumo = lerNumero(ic.value), valor = lerNumero(iv.value);
+    const invalido = [[ic, consumo], [iv, valor]].filter(([, n]) => Number.isNaN(n) || n < 0).map(([i]) => i);
+    if (invalido.length) return { l, invalido };
+    const mudouConsumo = alterou(consumo, l.consumo, 0), mudouValor = alterou(valor, l.valor, 2);
+    let agua = l.agua, esgoto = l.esgoto, pelaTarifa = false;
+    if (mudouConsumo || mudouValor) {
+      const c = contaPelaTarifa(l, consumo);
+      if (c != null && Math.abs(c.agua + c.esgoto - valor) < 0.006) { agua = c.agua; esgoto = c.esgoto; pelaTarifa = true; }
+      else {
+        const base = l.agua + l.esgoto;
+        agua = base > 0 ? valor * (l.agua / base) : valor;
+        esgoto = base > 0 ? valor * (l.esgoto / base) : 0;
+      }
+    }
+    return { l, invalido, consumo, valor, mudouConsumo, mudouValor, agua, esgoto, pelaTarifa };
+  }
+
+  function leAjustes() {
+    const ajustes = [];
+    let invalido = false;
+    document.querySelectorAll("#corpoTop20 tr").forEach((tr) => {
+      const e = estadoLinha(tr);
+      tr.querySelectorAll("input[data-campo]").forEach((i) => i.classList.remove("alterado", "invalido"));
+      if (e.invalido.length) { e.invalido.forEach((i) => i.classList.add("invalido")); invalido = true; return; }
+      if (e.mudouConsumo) inputDe(tr, "consumo").classList.add("alterado");
+      if (e.mudouValor) inputDe(tr, "valor").classList.add("alterado");
+      if (!e.mudouConsumo && !e.mudouValor) return;
+      const aj = { ligacao: e.l.ligacao, consumo: e.mudouConsumo ? e.consumo : null, valor: e.mudouValor ? e.valor : null };
+      if (e.pelaTarifa && e.mudouValor) { aj.agua = e.agua; aj.esgoto = e.esgoto; }    // água e esgoto pela tarifa
+      ajustes.push(aj);
+    });
+    return { ajustes, invalido };
+  }
+
+
+  // Ordena as linhas (padrão: Valor total, maior para menor). Clicar de novo no mesmo título inverte.
+  let ordemAtual = { campo: "valor", desc: true };
+  function ordenaTabela(campo, forcaDesc) {
+    const desc = forcaDesc ? true : (ordemAtual.campo === campo ? !ordemAtual.desc : true);
+    ordemAtual = { campo, desc };
+    const corpo = $("corpoTop20");
+    const valorLinha = (tr) => {
+      const inp = inputDe(tr, campo);
+      const n = lerNumero(inp.value);
+      return Number.isNaN(n) ? linhasTop20[+tr.dataset.indice][campo] : n;
+    };
+    const trs = Array.from(corpo.children).sort((a, b) =>
+      (desc ? valorLinha(b) - valorLinha(a) : valorLinha(a) - valorLinha(b)) || (+a.dataset.indice - +b.dataset.indice));
+    trs.forEach((tr, pos) => { tr.firstChild.textContent = pos + 1; corpo.appendChild(tr); });
+    document.querySelectorAll(".tabela-top20 th.ordenavel").forEach((th) => {
+      th.querySelector(".seta").textContent = th.dataset.ordem === campo ? (desc ? "▼" : "▲") : "";
+    });
+  }
+  document.querySelectorAll(".tabela-top20 th.ordenavel").forEach((th) => {
+    th.addEventListener("click", () => ordenaTabela(th.dataset.ordem));
+    th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ordenaTabela(th.dataset.ordem); } });
+  });
+
+  // filtros da conferência: texto (ligação, cliente, grupo), superintendência e categoria — valem juntos.
+  // A categoria só ajuda a escolher as contas: o quadro por grupo continua com o total.
+  function filtraTop20() {
+    const termo = $("buscaTop20").value.trim().toLowerCase(), sup = $("supTop20").value, cat = $("catTop20").value;
+    document.querySelectorAll("#corpoTop20 tr").forEach((tr) => {
+      const l = linhasTop20[+tr.dataset.indice];
+      tr.hidden = (!!termo && !(`${l.ligacao} ${l.cliente} ${l.grupo}`.toLowerCase().includes(termo)))
+        || (!!sup && (l.sup || "SEM SUP") !== sup)
+        || (!!cat && (l.categoria || "SEM CATEGORIA") !== cat);
+    });
+    $("chkTodosTop20").checked = false;
+  }
+  $("buscaTop20").addEventListener("input", filtraTop20);
+  $("supTop20").addEventListener("change", () => { filtraTop20(); atualizaGrupos(); });
+  $("catTop20").addEventListener("change", filtraTop20);
+  // marcar todas = só as linhas visíveis (com os filtros aplicados)
+  $("chkTodosTop20").addEventListener("change", (e) => {
+    document.querySelectorAll("#corpoTop20 tr").forEach((tr) => { if (!tr.hidden) tr.querySelector(".chk-conta").checked = e.target.checked; });
+  });
+  $("btnMinimoMarcadas").addEventListener("click", () => {
+    const marcadas = Array.from(document.querySelectorAll("#corpoTop20 tr")).filter((tr) => tr.querySelector(".chk-conta").checked);
+    if (!marcadas.length) { $("contadorTop20").textContent = "Marque as contas na primeira coluna."; return; }
+    const sem = marcadas.filter((tr) => !aplicaMinimo(tr)).length;
+    atualizaContador();
+    if (sem) $("contadorTop20").innerHTML += ` · ${sem} marcada(s) sem estrutura tarifária da categoria (não alteradas)`;
+  });
+
+  // Quadro ao lado: totais de cada grupo de leitura + a diferença das alterações feitas na tabela (respeita a SUP escolhida)
+  function atualizaGrupos() {
+    const delta = new Map();                       // grupo -> [Δ consumo, Δ valor, Δ água em análise, Δ esgoto em análise]
+    document.querySelectorAll("#corpoTop20 tr").forEach((tr) => {
+      const e = estadoLinha(tr);
+      if (e.invalido.length || (!e.mudouConsumo && !e.mudouValor)) return;
+      const d = delta.get(e.l.grupo) || [0, 0, 0, 0];
+      d[0] += e.consumo - e.l.consumo;
+      d[1] += e.valor - e.l.valor;
+      if (conf.comSituacao) { d[2] += e.agua - e.l.agua; d[3] += e.esgoto - e.l.esgoto; }   // contas da lista estão em análise
+      delta.set(e.l.grupo, d);
+    });
+    const sup = $("supTop20").value, corpo = $("corpoGrupos");
+    corpo.innerHTML = "";
+    const tot = { consumo: 0, valor: 0, consumo_ant: 0, valor_ant: 0, agua: 0, esgoto: 0 };
+    const pct = (a, b) => (b ? (a / b - 1) * 100 : null);
+    const celDelta = (p) => { const td = document.createElement("td"); td.className = "num" + (p != null && p < 0 ? " neg" : "");
+      td.textContent = p == null ? "—" : (p > 0 ? "+" : "") + fmtNum(p, 1) + "%"; return td; };
+    gruposTop20.filter((g) => !sup || (g.sup || "SEM SUP") === sup).forEach((g) => {
+      const d = delta.get(g.grupo) || [0, 0, 0, 0], alterado = Math.abs(d[0]) > 1e-9 || Math.abs(d[1]) > 0.004;
+      const consumo = g.consumo + d[0], valor = g.valor + d[1];
+      const agua = (g.analise_agua || 0) + d[2], esgoto = (g.analise_esgoto || 0) + d[3];
+      tot.consumo += consumo; tot.valor += valor; tot.consumo_ant += g.consumo_ant; tot.valor_ant += g.valor_ant;
+      tot.agua += agua; tot.esgoto += esgoto;
+      const tr = document.createElement("tr");
+      if (alterado) { tr.className = "alterado"; tr.title = `Original: ${fmtNum(g.consumo, 0)} m³ · R$ ${fmtNum(g.valor, 2)}`; }
+      [[g.grupo, ""], [fmtNum(consumo, 0), "num"], [fmtNum(g.consumo_ant, 0), "num ant"],
+       [fmtNum(valor, 2), "num"], [fmtNum(g.valor_ant, 2), "num ant"]].forEach(([t, c]) => {
+        const td = document.createElement("td"); td.textContent = t; if (c) td.className = c; tr.appendChild(td); });
+      tr.appendChild(celDelta(pct(valor, g.valor_ant)));
+      [[agua, agua > conf.limite], [esgoto, false]].forEach(([v, alerta]) => {
+        const td = document.createElement("td"); td.className = "num" + (alerta ? " alerta" : ""); td.textContent = fmtNum(v, 2);
+        if (alerta) td.title = `Água em análise acima de R$ ${fmtNum(conf.limite, 0)}`;
+        tr.appendChild(td); });
+      corpo.appendChild(tr);
+    });
+    const ft = $("totalGrupos");
+    ft.innerHTML = "";
+    const tr = document.createElement("tr");
+    [["Total", ""], [fmtNum(tot.consumo, 0), "num"], [fmtNum(tot.consumo_ant, 0), "num"],
+     [fmtNum(tot.valor, 2), "num"], [fmtNum(tot.valor_ant, 2), "num"]].forEach(([t, c]) => {
+      const td = document.createElement("td"); td.textContent = t; if (c) td.className = c; tr.appendChild(td); });
+    tr.appendChild(celDelta(pct(tot.valor, tot.valor_ant)));
+    [tot.agua, tot.esgoto].forEach((v) => { const td = document.createElement("td"); td.className = "num"; td.textContent = fmtNum(v, 2); tr.appendChild(td); });
+    ft.appendChild(tr);
+    $("notaGrupos").hidden = false;
+  }
+
+  function atualizaContador() {
+    atualizaGrupos();
+    const { ajustes, invalido } = leAjustes();
+    $("contadorTop20").innerHTML = invalido
+      ? "Há valores inválidos (use apenas números)."
+      : ajustes.length ? `<b>${ajustes.length}</b> cliente(s) alterado(s)` : "Nenhuma alteração";
+    $("btnAplicar").disabled = invalido;
+  }
+
+  function continuaAnalise(ajustes) {
+    $("etapaTop20").hidden = true;
+    progresso.hidden = false;
+    progresso.classList.remove("erro");
+    $("statusNota").textContent = (ajustes.length ? `Usando ${ajustes.length} cliente(s) com valores alterados.` : "Usando os valores originais.")
+      + (ultimaLeitura ? " " + ultimaLeitura + "." : "");
+    limpaEtapas();
+    iniciaEta("f2");
+    setStatus("Processando…", 52);
+    bloqueia(true);
+    pegaWorker().postMessage({ fase: "continuar", ajustes });
+  }
+
+  $("btnAplicar").addEventListener("click", () => {
+    const { ajustes, invalido } = leAjustes();
+    if (!invalido) continuaAnalise(ajustes);
+  });
+  $("btnPular").addEventListener("click", () => continuaAnalise([]));
+  $("btnRestaurar").addEventListener("click", () => {
+    document.querySelectorAll("#corpoTop20 input[data-campo]").forEach((inp) => {
+      const l = linhasTop20[+inp.dataset.indice];
+      inp.value = fmtNum(l[inp.dataset.campo], +inp.dataset.dec);
+      inp.classList.remove("recalculado");
+      inp.title = "original: " + fmtNum(l[inp.dataset.campo], +inp.dataset.dec);
+    });
+    document.querySelectorAll("#corpoTop20 .chk-conta").forEach((c) => { c.checked = false; });
+    $("chkTodosTop20").checked = false;
+    atualizaContador();
+  });
+
+
+  // ===== Navegação e filtros (listas suspensas, presentes em todas as abas) =====
+  const filtrosEstado = { view: "resumo", sup: "TODAS", mes: null, ref: "" };
+  let infoFiltros = null;
+  const quadro = () => $("quadroRelatorio");
+  const janela = () => quadro().contentWindow;
+  const escapa = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const TITULOS_VAZIO = {
+    dre: ["DRE: orçado × realizado", "Realizado do mês contra o orçado RF e o orçado SUP, por superintendência"],
+    indiretas: ["Indiretas", "Orçado × realizado por classe, evolução mensal e ticket médio do serviço avulso"],
+    resumo: ["Resumo", "KPIs, gráfico de faturamento por grupo e destaques do mês"],
+    tabelas: ["Diretas", "Tabelas de água e esgoto por grupo, orçado por ciclo, consumo mínimo e Top 100"],
+    dados: ["Dados", "Bases carregadas, avisos e explicação de como cada cálculo é feito (inclusive o forecast)"],
+    forecast: ["Forecast", "Previsão de fechamento do mês, editável: ao mudar um valor, os totais e comparações se refazem"],
+  };
+  // quais filtros valem em cada aba (os demais ficam esmaecidos)
+  const APLICA = { dre: ["Sup", "Ref", "Mes"], indiretas: ["Sup", "Mes"], resumo: ["Sup", "Grupo"], tabelas: ["Sup", "Grupo"], analise: ["Sup", "Grupo"], dados: [], forecast: ["Sup", "Ref"] };
+
+  function aplicaFiltros() {
+    document.querySelectorAll("#nav .tab").forEach((t) => t.classList.toggle("active", t.dataset.view === filtrosEstado.view));
+    ["Sup", "Ref", "Mes", "Grupo"].forEach((f) => {
+      const ok = APLICA[filtrosEstado.view].includes(f);
+      $("fg" + f).classList.toggle("inativo", !ok);
+      $("fg" + f).title = ok ? "" : "Este filtro não se aplica a esta aba";
+    });
+    const w = quadro().hidden ? null : janela();
+    if (!w || !w.mostrarView) {
+      $("vazioTitulo").textContent = TITULOS_VAZIO[filtrosEstado.view][0];
+      $("vazioDica").textContent = TITULOS_VAZIO[filtrosEstado.view][1];
+      return;
+    }
+    w.mostrarView(filtrosEstado.view);
+    w.definirFiltros({ sup: filtrosEstado.sup, mes: filtrosEstado.mes, ref: filtrosEstado.ref });
+  }
+
+  function montaFiltros() {
+    const doc = quadro().contentDocument;
+    const el = doc && doc.getElementById("info-filtros");
+    try { infoFiltros = el ? JSON.parse(el.textContent) : null; } catch (e) { infoFiltros = null; }
+    // esconde, dentro do relatório, os controles que ficam no cabeçalho do site
+    const estilo = doc.createElement("style");
+    estilo.textContent = ".header-exec, .toolbar { display: none !important; } #view-resumo, #view-tabelas, #view-analise, #view-dre, #view-indiretas, #view-dados { padding-top: 16px; }";
+    doc.head.appendChild(estilo);
+    filtrosEstado.sup = "TODAS"; filtrosEstado.ref = infoFiltros.refPadrao || "";
+    filtrosEstado.mes = infoFiltros ? infoFiltros.mesAtual : null;
+    const opcoes = (sel, itens, atual) => { sel.innerHTML = itens.map(([v, t]) => `<option value="${escapa(v)}" ${v === atual ? "selected" : ""}>${escapa(t)}</option>`).join(""); sel.disabled = false; };
+    opcoes($("selSupTop"), infoFiltros.sups.map((s) => [s, s === "TODAS" ? "Todas" : s]), "TODAS");
+    const fontes = infoFiltros.fontes || [];
+    const [r1, r2] = (infoFiltros.refPadrao || "").split("|");
+    const itensRef = [["", "—"]].concat(fontes.map((f) => [f, f]));
+    opcoes($("selRef1Top"), fontes.length ? itensRef : [["", "Sem orçado"]], r1 || "");
+    opcoes($("selRef2Top"), fontes.length ? itensRef : [["", "—"]], r2 || "");
+    opcoes($("selMesTop"), infoFiltros.meses.map((m) => [m.ref, m.label]), filtrosEstado.mes);
+    const grupos = Array.from(doc.querySelectorAll(".chk-grupo"));
+    $("listaGrupos").innerHTML = `<label><input type="checkbox" id="chkTodosGrupos" checked> <b>Selecionar todos</b></label><hr>` +
+      grupos.map((g) => `<label><input type="checkbox" class="chk-grupo-top" value="${escapa(g.value)}" checked> ${escapa(g.value)}</label>`).join("");
+    $("btnGrupo").textContent = "Todos ▾"; $("btnGrupo").disabled = false;
+    $("btnPdf").hidden = false;
+    filtrosEstado.view = "resumo";
+    aplicaFiltros();
+  }
+
+  function aplicaGrupos() {
+    const w = janela(), todos = Array.from(document.querySelectorAll(".chk-grupo-top"));
+    const marcados = new Set(todos.filter((c) => c.checked).map((c) => c.value));
+    w.document.querySelectorAll(".chk-grupo").forEach((c) => { c.checked = marcados.has(c.value); });
+    if (w.filtrarPorGrupo) w.filtrarPorGrupo();
+    $("btnGrupo").textContent = (marcados.size === todos.length ? "Todos" : `${marcados.size} de ${todos.length}`) + " ▾";
+    $("chkTodosGrupos").checked = marcados.size === todos.length;
+  }
+
+  $("nav").addEventListener("click", (e) => {
+    const t = e.target.closest(".tab"); if (!t) return;
+    filtrosEstado.view = t.dataset.view; aplicaFiltros();
+  });
+  // a lista de grupos do topo mostra só os grupos da superintendência escolhida (o relatório já marcou quais são)
+  function sincronizaGrupos() {
+    const doc = quadro().contentDocument; if (!doc) return;
+    const caixas = Array.from(doc.querySelectorAll(".chk-grupo")).filter((c) => { const l = c.closest("label"); return !l || l.style.display !== "none"; });
+    $("listaGrupos").innerHTML = `<label><input type="checkbox" id="chkTodosGrupos" ${caixas.every((c) => c.checked) ? "checked" : ""}> <b>Selecionar todos</b></label><hr>` +
+      caixas.map((g) => `<label><input type="checkbox" class="chk-grupo-top" value="${escapa(g.value)}" ${g.checked ? "checked" : ""}> ${escapa(g.value)}</label>`).join("");
+    const marcados = caixas.filter((c) => c.checked).length;
+    $("btnGrupo").textContent = (marcados === caixas.length ? "Todos" : `${marcados} de ${caixas.length}`) + " ▾";
+  }
+  $("selSupTop").addEventListener("change", (e) => { filtrosEstado.sup = e.target.value; aplicaFiltros(); sincronizaGrupos(); });
+  const mudouRef = () => {
+    const escolhidas = [$("selRef1Top").value, $("selRef2Top").value].filter((v, i, a) => v && a.indexOf(v) === i);
+    filtrosEstado.ref = escolhidas.join("|"); aplicaFiltros();
+  };
+  $("selRef1Top").addEventListener("change", mudouRef);
+  $("selRef2Top").addEventListener("change", mudouRef);
+  $("selMesTop").addEventListener("change", (e) => { filtrosEstado.mes = e.target.value; aplicaFiltros(); });
+  $("btnGrupo").addEventListener("click", (e) => { e.stopPropagation(); $("ddGrupo").classList.toggle("aberto"); });
+  document.addEventListener("click", (e) => { if (!e.target.closest("#ddGrupo")) $("ddGrupo").classList.remove("aberto"); });
+  $("listaGrupos").addEventListener("change", (e) => {
+    if (e.target.id === "chkTodosGrupos") document.querySelectorAll(".chk-grupo-top").forEach((c) => { c.checked = e.target.checked; });
+    aplicaGrupos();
+  });
+  // PDF executivo: o arquivo .pdf é gerado direto (jsPDF + html2canvas, da pasta lib/ do site) — sem a janela de impressão
+  // o código das bibliotecas é passado como texto: o relatório o coloca no documento do PDF (é lá que elas desenham)
+  let codigoLibsPdf = null;
+  async function libsPdf() {
+    if (!codigoLibsPdf) {
+      codigoLibsPdf = Promise.all(["lib/jspdf.umd.min.js", "lib/html2canvas.min.js"].map(async (u) => {
+        const r = await fetch(u); if (!r.ok) throw new Error(`não carregou ${u} (HTTP ${r.status})`); return r.text();
+      }));
+    }
+    try { return { codigo: await codigoLibsPdf }; } catch (e) { codigoLibsPdf = null; console.warn(e); return null; }
+  }
+  $("btnPdf").addEventListener("click", async () => {
+    const w = janela(); w.focus();
+    if (!w.gerarExecutivo) { w.print(); return; }                 // relatório antigo (sem executivo): imprime a tela
+    w.gerarExecutivo(await libsPdf());                             // sem as bibliotecas, o relatório tenta o CDN e depois a impressão
+  });
+  quadro().addEventListener("load", () => { if (quadro().srcdoc) montaFiltros(); });
+
+  btnPasta.addEventListener("click", escolhePasta);
+  $("btnLimparCache").addEventListener("click", () => {
+    if (!confirm("Apagar os arquivos já lidos guardados neste navegador? A próxima análise vai ler todos os arquivos de novo.")) return;
+    pegaWorker().postMessage({ fase: "limparCache" });
+  });
+  btnAtualizar.addEventListener("click", atualiza);
+  $("btnCopiarLog").addEventListener("click", () => {
+    const texto = $("logExecucao").textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).catch(() => {
+      const r = document.createRange(); r.selectNodeContents($("logExecucao"));
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    });
+  });
+
+  inputPasta.addEventListener("change", async () => {
+    const lista = Array.from(inputPasta.files || []);
+    if (!lista.length) return;
+    iniciaExecucao();
+    const nomePasta = (lista[0].webkitRelativePath || "").split("/")[0] || "pasta";
+    try {
+      enviaParaAnalise(await lerListaArquivos(lista), nomePasta);
+    } catch (e) {
+      mostraErro("Não foi possível ler os arquivos.", String(e));
+    }
+  });
+
+  // ===== Ao abrir o site: aguarda a pasta conectada e tenta carregar os arquivos sozinho =====
+  // O navegador só deixa pedir de novo a permissão da pasta depois de um clique/tecla do usuário.
+  // Então: se a permissão já vale, carrega na hora; se não, a PRIMEIRA interação com a página
+  // (clique em qualquer lugar ou tecla) reconecta e carrega sozinha.
+  (async function inicia() {
+    if (!("showDirectoryPicker" in window)) return;
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    const h = await idb.get("pasta");
+    if (!h) return;
+    pastaHandle = h;
+    btnAtualizar.hidden = false;
+    btnAtualizar.title = `Reler a pasta "${h.name}"`;
+    const nome = h.name ? ` <b>${h.name}</b>` : "";
+
+    let permissao = "prompt";
+    try { permissao = await h.queryPermission({ mode: "read" }); } catch (e) {}
+    if (permissao === "granted") {
+      setFonte(`Pasta anterior:${nome} — lendo os arquivos…`);
+      analisaHandle(h);
+      return;
+    }
+
+    // Tenta pedir a permissão já ao abrir (alguns navegadores deixam); senão, espera o 1º clique
+    try {
+      if ((await h.requestPermission({ mode: "read" })) === "granted") {
+        setFonte(`Pasta anterior:${nome} — lendo os arquivos…`);
+        analisaHandle(h);
+        return;
+      }
+    } catch (e) { /* precisa de um gesto do usuário */ }
+
+    setFonte(`Pasta anterior encontrada (${nome.trim() || "conectada"}) — <b>clique em qualquer lugar da página</b> para reconectar e carregar. No aviso do Chrome, escolha <b>Permitir em todas as visitas</b> para a conexão ser automática.`);
+    const reconecta = (ev) => {
+      document.removeEventListener("pointerdown", reconecta, true);
+      document.removeEventListener("keydown", reconecta, true);
+      if (rodando) return;
+      if (ev.target && ev.target.closest && ev.target.closest("#btnPasta")) return;   // quer escolher outra pasta
+      setFonte(`Reconectando${nome ? " com" + nome : ""}…`);
+      analisaHandle(h);
+    };
+    document.addEventListener("pointerdown", reconecta, true);
+    document.addEventListener("keydown", reconecta, true);
+  })();
+})();
+</script>
+</body>
+</html>
