@@ -11,6 +11,7 @@ import html
 import json
 import os
 
+from .analitico import gera_analitico_html, seta_detalhe
 from .analises import exporta_top100, gera_top100_aumentos, gera_top100_quedas, monta_dados_resumo_grupo
 from .base import monta_base
 from .comparativo import calcula_comparativos, confere_economias_agua, define_referencias
@@ -99,12 +100,6 @@ class Sessao:
                                                  ctx.ref_anterior, self.caminho_top100)
         aum_agua_df, aum_esg_df = gera_top100_aumentos(ctx.df_atual, ctx.df_anterior, ctx.ref_atual, ctx.ref_anterior)
 
-        def seta(df, rotulo, arquivo, aba, chave, ds):
-            """Seta de baixar de UMA tabela (água ou esgoto); com grupos desmarcados, baixa o CSV refeito só com eles."""
-            b = botao_download_xlsx(rotulo, arquivo, xlsx_bytes({aba: df}))
-            return (f'<span data-csv-filtrado="top" data-tops="{chave}" data-sup="{ds}" '
-                    f'data-nome="{arquivo.rsplit(".", 1)[0]}">{b}</span>')
-
         # um conjunto de rankings por superintendência (o filtro Superintendência mostra o da SUP escolhida)
         blocos_queda, blocos_aumento = [], []
         top_por_sup = {}                               # para os Destaques do mês de cada superintendência
@@ -121,19 +116,17 @@ class Sessao:
             ctx.resultados.setdefault("top_sup", {})[sup] = (qa, qe, aa, ae)      # para os downloads da aba Dados
             sl = "".join(c for c in sup.lower() if c.isalnum())
             ds = html.escape(sup, quote=True)
-            sa = "" if sup == "TODAS" else "_" + sl
-            bqa = seta(qa, f"Baixar Top 100 quedas — Água{nome_sup} (Excel)", f"Top100_Quedas_Agua{sa}.xlsx", "Top100_Agua", "queda-agua", ds)
-            bqe = seta(qe, f"Baixar Top 100 quedas — Esgoto{nome_sup} (Excel)", f"Top100_Quedas_Esgoto{sa}.xlsx", "Top100_Esgoto", "queda-esgoto", ds)
-            baa = seta(aa, f"Baixar Top 100 aumentos — Água{nome_sup} (Excel)", f"Top100_Aumentos_Agua{sa}.xlsx", "Top100_Aumento_Agua",
-                       "aumento-agua", ds)
-            bae = seta(ae, f"Baixar Top 100 aumentos — Esgoto{nome_sup} (Excel)", f"Top100_Aumentos_Esgoto{sa}.xlsx", "Top100_Aumento_Esgoto",
-                       "aumento-esgoto", ds)
+            # ⬇≡ = ranking completo (todas as ligações com queda/aumento), com o analítico de cada uma
+            det = lambda k: seta_detalhe("top-" + k, sup, "Baixar o ranking completo com o analítico por matrícula (CSV)")
             blocos_queda.append(f'<div class="sup-top-bloco" data-sup="{ds}">'
-                                + gera_tabela_top100_html(qa, "Água" + suf, "agua-" + sl, bqa, chave="queda-agua")
-                                + gera_tabela_top100_html(qe, "Esgoto" + suf, "esgoto-" + sl, bqe, chave="queda-esgoto") + "</div>")
+                                + gera_tabela_top100_html(qa, "Água" + suf, "agua-" + sl, det("queda-agua"), chave="queda-agua")
+                                + gera_tabela_top100_html(qe, "Esgoto" + suf, "esgoto-" + sl, det("queda-esgoto"), chave="queda-esgoto")
+                                + "</div>")
             blocos_aumento.append(f'<div class="sup-top-bloco" data-sup="{ds}">'
-                                  + gera_tabela_top100_html(aa, "Água" + suf, "aumento-agua-" + sl, baa, aumento=True, chave="aumento-agua")
-                                  + gera_tabela_top100_html(ae, "Esgoto" + suf, "aumento-esgoto-" + sl, bae, aumento=True, chave="aumento-esgoto")
+                                  + gera_tabela_top100_html(aa, "Água" + suf, "aumento-agua-" + sl, det("aumento-agua"), aumento=True,
+                                                            chave="aumento-agua")
+                                  + gera_tabela_top100_html(ae, "Esgoto" + suf, "aumento-esgoto-" + sl, det("aumento-esgoto"), aumento=True,
+                                                            chave="aumento-esgoto")
                                   + "</div>")
         # candidatos para o filtro de grupos: as 100 maiores de cada grupo (Todas as SUPs), embutidas uma vez
         candidatos = {}
@@ -147,7 +140,7 @@ class Sessao:
                      + json.dumps(candidatos, ensure_ascii=False).replace("</", "<\\/") + "</script>")
         tabela_top100_agua_html, tabela_top100_esgoto_html = "".join(blocos_queda) + dados_top, ""
         passo(80, "Criando tabelas: Top 100 maior aumento de consumo (água e esgoto)")
-        tabela_aumento_agua_html, tabela_aumento_esgoto_html = "".join(blocos_aumento), ""
+        tabela_aumento_agua_html, tabela_aumento_esgoto_html = "".join(blocos_aumento), gera_analitico_html(ctx)
         passo(81, "Criando cards: Situação de lançamento (por que analisar cada código)")
         from .situacao_lancamento import gera_cards_situacao_html
         cards_situacao_html = gera_cards_situacao_html(ctx)
@@ -175,8 +168,8 @@ class Sessao:
         if texto_justificativa is None:
             texto_justificativa = TEXTO_JUSTIFICATIVA_PADRAO
         passo(86, "Criando tabelas: Comparativo Água e Esgoto mês a mês")
-        tabela_agua_html = gera_tabela(ctx, ctx.comp_agua, "Comparativo Água Mês a Mês", "agua")
-        tabela_esgoto_html = gera_tabela(ctx, ctx.comp_esgoto, "Comparativo Esgoto Mês a Mês", "esgoto")
+        tabela_agua_html = gera_tabela(ctx, ctx.comp_agua, "Comparativo Água Mês a Mês", "agua", detalhe="diretas-agua", pendentes=True)
+        tabela_esgoto_html = gera_tabela(ctx, ctx.comp_esgoto, "Comparativo Esgoto Mês a Mês", "esgoto", detalhe="diretas-esgoto", pendentes=True)
         passo(87, "Criando tabelas: Orçado por ciclo (água e esgoto)")
         tabelas_orcado_ciclo_html = gera_tabelas_orcado_ciclo_html(ctx)
         situacao_ciclos_html = gera_situacao_ciclos_html(ctx)

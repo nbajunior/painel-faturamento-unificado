@@ -45,7 +45,7 @@ COLUNAS_USADAS_FATURA = set(NOMES_LIGACAO) | {"Grupo", "Rubrica", "Valor Parcela
                                               "Nome Cliente", "Categoria", "Situacao Ligacao", "Situacao Conta", "Nome da Localidade",
                                               "Situacao Lancamento"}
 COLUNAS_USADAS_CONSUMO = set(NOMES_LIGACAO) | {"Leitura Atual", "Consumo Medido", "Consumo Faturado", "Mes Lancamento",
-                                               "Ano Lancamento", "Situacao Conta", "Nome da Localidade", "Situacao Lancamento"} | set(COLUNAS_ECONOMIA_TODAS)          # para achar o cabeçalho e o tipo do arquivo basta o começo
+                                               "Ano Lancamento", "Situacao Conta", "Grupo", "Nome da Localidade", "Situacao Lancamento"} | set(COLUNAS_ECONOMIA_TODAS)          # para achar o cabeçalho e o tipo do arquivo basta o começo
 
 
 def mapeia_unicos(serie, funcao):
@@ -199,6 +199,9 @@ def identifica_tipo(colunas, nome=""):
     colunas = set(colunas)
     if eh_planilha_tarifa(colunas):
         return "tarifa"
+    # eventos faturados do orçado SUP (quantidades): Sup, Rubrica e um ou mais meses, com "evento" no nome do arquivo
+    if {"Sup", "Rubrica"}.issubset(colunas) and colunas_de_mes(colunas) and "EVENTO" in chave_texto(nome):
+        return "orcado_eventos"
     if {"Sup", "Rubrica"}.issubset(colunas) and len(colunas_de_mes(colunas)) >= 3:
         return "orcado"
     # O serviço avulso tem as mesmas colunas da fatura (inclusive endereço e localidade),
@@ -306,7 +309,10 @@ def processa_consumo(caminho):
 
     df["N. Ligação_consumo"] = df[col_ligacao].astype(str).str.strip()
 
-    colunas_conflito = ["Grupo", "Situacao Ligacao", "Nome Cliente", "Categoria", col_ligacao]
+    # o grupo do consumo só serve para a Situação do grupo (grupo lido e ainda sem fatura); no cruzamento manda o da fatura
+    if "Grupo" in df.columns:
+        df = df.rename(columns={"Grupo": "Grupo_consumo"})
+    colunas_conflito = ["Situacao Ligacao", "Nome Cliente", "Categoria", col_ligacao]
     df = df.drop(columns=[c for c in colunas_conflito if c in df.columns], errors="ignore")
 
     return compacta_textos(df.drop_duplicates(subset=["N. Ligação_consumo", "Referência"]))
@@ -493,7 +499,9 @@ def _classifica_um(caminho, nome):
         print(f"   ⚠️ {nome} ignorado: não foi possível ler ({exc})")
         return {"motivo": f"não foi possível ler: {exc}", "erro": True}
     motivo = "colunas não correspondem a consumo, fatura ou cronograma"
-    if df_head is not None and {"Sup", "Rubrica"}.issubset(df_head.columns):
+    if df_head is not None and "EVENTO" in chave_texto(nome) and "Rubrica" in df_head.columns:
+        motivo = "eventos do orçado SUP fora do modelo (esperado: colunas Sup, Rubrica e um mês por coluna, como out/26)"
+    elif df_head is not None and {"Sup", "Rubrica"}.issubset(df_head.columns):
         motivo = "planilha de orçado fora do modelo (esperado: colunas Sup, Rubrica e meses como jan/26, igual ao RF01T26)"
     return {"motivo": motivo}
 
@@ -545,11 +553,12 @@ def classifica_arquivos(pasta, progresso=None):
                  for t in ("consumo", "fatura", "cronograma", "avulso")}
     resultado["orcado"] = [(c["caminho"], c["aba"]) for c in classificados if c["tipo"] == "orcado"]
     resultado["tarifa"] = [(c["caminho"], c["aba"]) for c in classificados if c["tipo"] == "tarifa"]
+    resultado["orcado_eventos"] = [(c["caminho"], c["aba"]) for c in classificados if c["tipo"] == "orcado_eventos"]
     resultado["ignorados"] = ignorados
     print(f"📁 Consumo: {len(resultado['consumo'])} | Fatura: {len(resultado['fatura'])} | "
           f"Cronograma: {len(resultado['cronograma'])} | "
           f"Serviço avulso: {len(resultado['avulso'])} | Orçado: {len(resultado['orcado'])} | "
-          f"Estrutura tarifária: {len(resultado['tarifa'])}")
+          f"Estrutura tarifária: {len(resultado['tarifa'])} | Eventos do orçado SUP: {len(resultado['orcado_eventos'])}")
     for ig in ignorados:
         print(f"   ⚠️ Ignorado: {ig['arquivo']} — {ig['motivo']}")
 

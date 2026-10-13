@@ -153,10 +153,13 @@
   },
   "rubricas_cancelamento": [
     "ABATIMENTO - M3",
+    "COFINS (3,00%) ART.64 LEI Nº 9.430/96",
+    "CRÉDITO DE ARRECADAÇÃO",
     "CREDITO/DEBITO DE ARRECADACAO - VAN",
-    "DESCONTO JUDICIAL PROVISORIO",
     "DESCONTO",
-    "CREDITO AJUSTE CONTA"
+    "DESCONTO JUDICIAL PROVISORIO",
+    "IR ESTADUAL",
+    "IR MUNICIPAL"
   ],
   "superintendencias": {
     "LAGOS": [

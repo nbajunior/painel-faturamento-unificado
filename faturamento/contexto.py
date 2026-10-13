@@ -23,6 +23,7 @@ class Contexto:
     cronograma: pd.DataFrame = None        # cronograma de leitura (datas por grupo e mês)
     consumo_economias: pd.DataFrame = None  # ligações do Consumo com consumo > 0 (conferência das economias)
     data_hoje: object = None               # data de hoje no computador de quem roda (vem do site); None = data do sistema
+    orcado_eventos: pd.DataFrame = None    # eventos faturados do orçado SUP: Sup, Rubrica, Referencia, Valor (quantidade), Arquivo
 
     # Meses comparados (preenchidos em `define_referencias`)
     ref_atual: str = ""

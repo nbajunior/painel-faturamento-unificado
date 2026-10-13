@@ -78,6 +78,45 @@ def dias_uteis_do_mes(ref, corte):
             "corte": tc, "corte_decorridos": dc, "corte_faltam": tc - dc}
 
 
+_SEMANA = "STQQSSD"
+
+
+def painel_dias_uteis_html(ref, corte):
+    """Faixa com os dias úteis já passados (até D-1) e os que faltam no mês `ref`, mais o calendário do mês.
+    É refeita a cada relatório pela data de corte (ontem), então os números andam sozinhos dia a dia."""
+    m, a = int(ref[:2]), int(ref[3:])
+    fer = feriados(a) | feriados(a + 1)
+    du = dias_uteis_do_mes(ref, corte)
+    celulas = []
+    for n in range(1, calendar.monthrange(a, m)[1] + 1):
+        d = dt.date(a, m, n)
+        util = _eh_util(d, fer)
+        eh_corte = util and d.weekday() != 4 and (d + dt.timedelta(days=1)) not in fer
+        classe = ("du-util" if util else "du-feriado" if d.weekday() < 5 else "du-fds") + (" du-passou" if d <= corte else "")
+        if eh_corte:
+            classe += " du-corte"
+        tipo = ("feriado" if d in fer else "fim de semana") if not util else "dia útil" + (" e dia de corte" if eh_corte else " (sem corte)")
+        estado = "já passou" if d <= corte else "falta"
+        celulas.append(f'<span class="{classe}" title="{d.strftime("%d/%m")} ({_SEMANA[d.weekday()]}) — {tipo} — {estado}">'
+                       f'<i>{_SEMANA[d.weekday()]}</i>{n}</span>')
+    c = corte.strftime("%d/%m/%Y")
+    pct = du["uteis_decorridos"] / du["uteis"] * 100 if du["uteis"] else 0
+    num = lambda v, t: f'<span class="du-num"><b>{v}</b>{t}</span>'
+    return (f'<div class="dias-uteis" data-corte="{corte.isoformat()}">'
+            f'<div class="du-linha"><span class="du-rot">Dias úteis de {html.escape(nome_mes(ref))} '
+            f'<small>(até {c}, D-1)</small></span>'
+            + num(du["uteis_decorridos"], "já passaram") + num(du["uteis_faltam"], "faltam") + num(du["uteis"], "no mês")
+            + f'<span class="du-barra" title="{fmt_num(pct, 0)}% dos dias úteis já passaram"><span style="width:{pct:.1f}%"></span></span></div>'
+            f'<div class="du-linha"><span class="du-rot">Dias de corte <small>(sem sextas e vésperas de feriado)</small></span>'
+            + num(du["corte_decorridos"], "já passaram") + num(du["corte_faltam"], "faltam") + num(du["corte"], "no mês") + '</div>'
+            f'<div class="du-cal">{"".join(celulas)}</div>'
+            '<p class="du-legenda"><span class="du-util du-passou du-corte"></span> dia útil que já passou '
+            '<span class="du-util du-corte"></span> dia útil que falta '
+            '<span class="du-util"></span> útil sem corte (sexta / véspera de feriado) '
+            '<span class="du-feriado"></span> feriado <span class="du-fds"></span> fim de semana · '
+            'Forecast das indiretas = realizado ÷ dias que já passaram × dias que faltam.</p></div>')
+
+
 def _mes_deslocado(ref, n):
     m, a = int(ref[:2]), int(ref[3:])
     t = a * 12 + (m - 1) - n
@@ -290,7 +329,7 @@ def previsao_html(ctx, sup):
     return (f'<div class="card prev-card"><h2 class="prev-titulo">Forecast de fechamento — {nome} — {nome_mes(ctx.ref_atual)}'
             '<span class="prev-acoes"><button type="button" class="btn-just btn-prev-restaurar" onclick="previsaoRestaurar(this)">↺ Restaurar automático</button>'
             '<button type="button" class="btn-just btn-prev-toggle" onclick="previsaoAlternar(this)">Ocultar forecast</button></span></h2>'
-            f'<p class="nota-secao prev-nota">{nota}</p>'
+            f'<p class="nota-secao prev-nota">{nota}</p>{painel_dias_uteis_html(ctx.ref_atual, dados["corte"])}'
             + tabela_previsao_html(ctx, sup, ctx.ref_atual, linhas_def, atual, dados["falta"]) + "</div>")
 
 
@@ -315,6 +354,35 @@ def _soma_ev(d):
     return d
 
 
+# rubricas da planilha de eventos do orçado SUP (chave_texto) → linha das Indiretas; a linha de total é ignorada (soma das classes)
+RUBRICA_EVENTO = {
+    "CORTE": "ri_CORTE", "CORTES": "ri_CORTE", "CORTERECORTE": "ri_CORTE", "RICORTESRECORTE": "ri_CORTE",
+    "RELIGACAO": "ri_RELIGAÇÃO", "RELIGACOES": "ri_RELIGAÇÃO", "RIRELIGACOES": "ri_RELIGAÇÃO",
+    "LNA": "ri_LNA", "RILIGACOESAGUA": "ri_LNA", "LIGACOESAGUA": "ri_LNA",
+    "SANCAO": "ri_SANÇÃO", "SANCOES": "ri_SANÇÃO", "FISCALIZACAO": "ri_SANÇÃO", "RIFISCALIZACAO": "ri_SANÇÃO",
+    "OUTROS": "ri_OUTROS", "RIOUTROSAGUA": "ri_OUTROS", "OUTROSAGUA": "ri_OUTROS",
+    "LNE": "iE", "ESGOTOINDIRETO": "iE", "FATDEESGOTOINDIRETOLNE": "iE", "FATBRUTODEESGOTOINDIRETO": "iE",
+}
+
+
+def eventos_orcados(ctx, sup, ref):
+    """{linha: quantidade} da planilha de eventos do orçado SUP no mês (TODAS soma as superintendências)."""
+    from .config import chave_texto
+    from .dre import _sup_orcado
+    d = getattr(ctx, "orcado_eventos", None)
+    if d is None or not len(d):
+        return {}
+    d = d[d["Referencia"] == ref]
+    if sup != TODAS:
+        d = d[d["Sup"].map(_sup_orcado) == _sup_orcado(sup)]
+    r = {}
+    for rub, v in zip(d["Rubrica"].map(chave_texto), d["Valor"]):
+        k = RUBRICA_EVENTO.get(rub)
+        if k and pd.notna(v):
+            r[k] = r.get(k, 0.0) + float(v)
+    return r
+
+
 def eventos_indiretas(ctx, sup, ref):
     """Eventos faturados (lançamentos do serviço avulso) por classe: realizado, ticket médio dos 3 meses fechados
     anteriores, orçado em eventos (orçado R$ ÷ ticket) e forecast (mesmo método do Forecast: ritmo por dia útil)."""
@@ -330,6 +398,12 @@ def eventos_indiretas(ctx, sup, ref):
     orc_r = _orcados_do_mes(ctx, sup, ref, fontes)
     orc_ev = {f: _soma_ev({"ev_" + k: (orc_r[f][k] / ticket[k]) if orc_r[f].get(k) is not None and ticket[k] else None
                            for k in CLASSE_DA_LINHA}) for f in fontes}
+    # orçado SUP: a planilha de eventos (quantidade informada) manda; classe sem número fica com R$ ÷ ticket
+    informados = eventos_orcados(ctx, sup, ref)
+    if informados:
+        for f in fontes:
+            if (ctx.orcado.get(f) or {}).get("tipo") == "sup":
+                orc_ev[f] = _soma_ev({**orc_ev[f], **{"ev_" + k: v for k, v in informados.items()}})
     falta = {}
     if mes_com_forecast(ctx, ref):
         falta = falta_por_dia_util(real, dias_uteis_do_mes(ref, data_corte(ctx)), CLASSE_DA_LINHA, "ev_")

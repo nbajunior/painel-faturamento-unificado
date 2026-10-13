@@ -53,6 +53,8 @@ def comparativo_ligacoes(df_at, df_ant, rubrica):
 
 def gera_top100_quedas(df_at, df_ant, rubrica, ref_at, ref_ant, aumento=False, por_grupo=False, sup=None):
     """Top 100 ligações com maior queda de consumo (ou maior aumento, com `aumento=True`) entre os dois meses.
+    Queda_Consumo, Queda_% e Queda_Valor_R$ = mês atual − mês anterior (negativos na queda; o valor pode sair positivo
+    quando o faturamento subiu apesar da queda de consumo).
     sup: só as ligações dessa superintendência (None/TODAS = todas).
     por_grupo=True: as 100 maiores de CADA grupo, na ordem geral (+ coluna Superintendência) — o Top 100 de qualquer
     conjunto de grupos sai dessa lista, e é isso que o filtro de grupos usa no navegador."""
@@ -61,16 +63,18 @@ def gera_top100_quedas(df_at, df_ant, rubrica, ref_at, ref_ant, aumento=False, p
     if sup and sup != "TODAS":
         base = base[base["Superintendência"] == sup]
     p = "Aumento" if aumento else "Queda"
-    sinal = -1 if aumento else 1
-    dif = sinal * (base["Consumo_Anterior"] - base["Consumo_Atual"])
-    comp = base[dif > 0].copy()
-    comp[f"{p}_Consumo"] = dif[dif > 0]
+    # variações sempre como mês atual − mês anterior: na queda, consumo, % e (em geral) valor saem negativos
+    variacao = base["Consumo_Atual"] - base["Consumo_Anterior"]
+    entra = variacao > 0 if aumento else variacao < 0
+    comp = base[entra].copy()
+    comp[f"{p}_Consumo"] = variacao[entra]
     ant_pos = comp["Consumo_Anterior"] > 0
     # no aumento, quem não consumia no mês anterior fica sem % (vazio), em vez de 0%
     comp[f"{p}_%"] = np.where(ant_pos, comp[f"{p}_Consumo"] / comp["Consumo_Anterior"].where(ant_pos, 1) * 100,
                               np.nan if aumento else 0)
-    comp[f"{p}_Valor_R$"] = sinal * (comp["Valor_Anterior"] - comp["Valor_Atual"])
-    comp = comp.sort_values(f"{p}_Consumo", ascending=False, kind="stable")
+    comp[f"{p}_Valor_R$"] = comp["Valor_Atual"] - comp["Valor_Anterior"]
+    # maior variação primeiro: no aumento, o maior positivo; na queda, o mais negativo
+    comp = comp.sort_values(f"{p}_Consumo", ascending=not aumento, kind="stable")
     comp = comp.groupby("Grupo", sort=False).head(100) if por_grupo else comp.head(100)
     comp["Ranking"] = range(1, len(comp) + 1)
 
@@ -158,6 +162,47 @@ def exporta_top100(df_atual, df_anterior, ref_atual, ref_anterior, caminho_saida
 
     print(f"✅ Top 100 quedas exportado para: {caminho_saida}")
     return top_agua_df, top_esg_df
+
+
+def classifica_minimo(agua):
+    """Para linhas de ÁGUA: o mesmo cálculo da tabela Acima × Abaixo do mínimo, linha a linha, para a base detalhada.
+    Devolve DataFrame (mesmo índice) com: minimo_economia (m³ por economia da categoria; vazio na mista), minimo
+    (mínimo da matrícula), conta (texto da conta) e classe (Acima / Abaixo / Fora: motivo)."""
+    tipos = list(MINIMO_POR_TIPO_ECONOMIA)
+    d = pd.DataFrame(index=agua.index)
+    qtds = pd.DataFrame({c: pd.to_numeric(agua[c], errors="coerce").fillna(0) if c in agua.columns else 0.0 for c in tipos},
+                        index=agua.index)
+    consumo = pd.to_numeric(agua.get("Consumo Faturado", 0), errors="coerce").fillna(0)
+    economias = qtds.sum(axis=1)
+    cats = agua["Categoria"].fillna("") if "Categoria" in agua.columns else pd.Series("", index=agua.index)
+    base = qtds.assign(Categoria=cats)
+    base["Minimo_Matricula"] = minimo_matricula_vetorizado(base) if len(base) else pd.Series(dtype=float)
+    mista = (qtds > 0).sum(axis=1) > 1
+    min_cat = cats.map({c: CONSUMO_MINIMO_POR_CATEGORIA.get(normaliza_texto(c)) for c in cats.unique()}).astype(float)
+    d["minimo_economia"] = min_cat.where(~mista)
+    d["minimo"] = base["Minimo_Matricula"]
+
+    def conta(chave):                                  # texto calculado uma vez por combinação (categoria + quantidades)
+        cat, *qs = chave
+        partes = [(q, c) for q, c in zip(qs, tipos) if q > 0]
+        if len(partes) > 1:
+            total = sum(q * MINIMO_POR_TIPO_ECONOMIA[c] for q, c in partes)
+            nome = lambda c: c.replace("Qtd. Economia ", "")
+            return " + ".join(f"{q:g} {nome(c)} × {MINIMO_POR_TIPO_ECONOMIA[c]:g}" for q, c in partes) + f" = {total:g} m³"
+        m = CONSUMO_MINIMO_POR_CATEGORIA.get(normaliza_texto(cat))
+        n = sum(qs)
+        if m is None:
+            return f"categoria {cat or '(vazia)'} sem mínimo cadastrado"
+        return f"{n:g} economia(s) × {m:g} ({cat}) = {m * n:g} m³"
+    chaves = list(zip(cats, *[qtds[c] for c in tipos]))
+    textos = {k: conta(k) for k in set(chaves)}
+    d["conta"] = [textos[k] for k in chaves]
+    classe = (consumo > d["minimo"]).map({True: "Acima", False: "Abaixo"})
+    classe = classe.where(d["minimo"].notna(), "Fora: categoria sem mínimo")
+    classe = classe.where(economias > 0, "Fora: sem economia")
+    classe = classe.where(consumo > 0, "Fora: consumo 0")
+    d["classe"] = classe
+    return d
 
 
 def minimo_matricula_vetorizado(df):

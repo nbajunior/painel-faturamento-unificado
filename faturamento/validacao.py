@@ -147,6 +147,30 @@ def _sup(df):
     return df.rename(columns={"__sup": "Superintendência", "__cidade": "Cidade (SUP)"})
 
 
+def _colunas_minimo(fat, completa, eh_agua, ctx):
+    """Consumo mínimo na base detalhada (só nas linhas de água, como a tabela Acima × Abaixo): mínimo por economia da
+    categoria, mínimo da matrícula, a conta, Acima/Abaixo (ou o motivo de ficar fora) e, nas linhas do mês atual,
+    o consumo e o Acima/Abaixo do mês anterior da mesma matrícula."""
+    from .analises import classifica_minimo
+    agua = completa[eh_agua]
+    cls = classifica_minimo(agua)
+    rn = ctx.ref_anterior
+    col_ant, col_cls_ant = f"Consumo Faturado mês anterior ({rn})", f"Acima/Abaixo do mínimo mês anterior ({rn})"
+    novas = {"Mínimo por economia da categoria (m³)": cls["minimo_economia"], "Mínimo da matrícula (m³)": cls["minimo"],
+             "Conta do mínimo": cls["conta"], "Acima/Abaixo do mínimo": cls["classe"]}
+    for nome, serie in novas.items():
+        fat[nome] = serie.reindex(fat.index)                      # linhas de esgoto ficam em branco
+    ant = agua[agua["Referencia de Leitura"] == rn]
+    lig_ant = ant["N. Ligação"].astype(str).str.strip()
+    consumo_ant = pd.to_numeric(ant["Consumo Faturado"], errors="coerce").groupby(lig_ant.values).first()
+    classe_ant = cls.loc[ant.index, "classe"].groupby(lig_ant.values).first()
+    atual_agua = fat.index.isin(agua.index) & (fat["Referencia de Leitura"] == ctx.ref_atual).to_numpy()
+    lig = fat["N. Ligação"].astype(str).str.strip()
+    fat[col_ant] = lig.map(consumo_ant).where(atual_agua)
+    fat[col_cls_ant] = lig.map(classe_ant).where(atual_agua)
+    fat.loc[atual_agua & fat[col_cls_ant].isna().to_numpy(), col_cls_ant] = "sem fatura no mês anterior"
+
+
 def monta_bases(ctx):
     """Prepara as bases que alimentam os cálculos, no formato para conferência."""
     from .dre import linha_do_orcado
@@ -157,8 +181,11 @@ def monta_bases(ctx):
     fat = fat[(fat["__serv"] != "") if "__serv" in fat.columns else fat["Rubrica"].str.contains("AGUA|ESGOTO", case=False, na=False)]
     cols = [c for c in COLUNAS_BASE + COLUNAS_ECONOMIA_TODAS + ["Situacao Conta", "Nome da Localidade", "__sup"] if c in fat.columns]
     total_fat = len(fat)
+    eh_agua = (fat["__serv"] == "A") if "__serv" in fat.columns else fat["Rubrica"].str.contains("AGUA", case=False, na=False)
+    completa = fat
     fat = _sup(fat[list(dict.fromkeys(cols))].head(LIMITE_BASE)).copy()      # só as linhas que vão para o CSV
     fat["Entra em economias/volume"] = (fat["Consumo Faturado"] > 0).map({True: "Sim", False: "Não"})
+    _colunas_minimo(fat, completa, eh_agua, ctx)
     BASES["fatura"] = {"df": fat, "truncada": total_fat > LIMITE_BASE, "total": total_fat}
 
     comp = getattr(ctx, "base_completa", None)
@@ -242,7 +269,10 @@ def _secao_bases(ctx):
 
 DESCRICAO_BASES = {
     "fatura": "Uma linha por ligação × rubrica (VALOR DE AGUA / VALOR DE ESGOTO) × mês, já cruzada com o consumo (Consumo Faturado, "
-              "economias) e o cronograma (Qts. Dias), só grupos até o último faturado. Alimenta Resumo, Diretas e o realizado das diretas na DRE.",
+              "economias) e o cronograma (Qts. Dias), só grupos até o último faturado. Alimenta Resumo, Diretas e o realizado das diretas na DRE. "
+              "Nas linhas de água traz o consumo mínimo usado na tabela Acima × Abaixo: mínimo por economia da categoria, mínimo da "
+              "matrícula, a conta (ligação mista soma cada tipo), Acima/Abaixo (ou o motivo de ficar fora) e, no mês atual, o consumo "
+              "e o Acima/Abaixo do mês anterior da mesma matrícula.",
     "fatura_mensal": "Soma por mês, grupo, serviço e superintendência (valor, volume e economias só onde Consumo Faturado &gt; 0), "
                      "com todos os meses e grupos. Alimenta o orçado por ciclo e o forecast das diretas.",
     "avulso": "Lançamentos do serviço avulso com a classe da rubrica (CORTE, RELIGAÇÃO, LNA, SANÇÃO, OUTROS, LNE). Alimenta a aba Indiretas, "
@@ -559,7 +589,7 @@ def _destaques_df(ctx, sup=TODAS):
         if top is not None and len(top):
             for _, x in top.head(2).iterrows():
                 linhas.append({"Card": f"Top 100 — {serv}", "Item": f"{x['Ranking']}ª maior queda: {x['N. Ligação']} (grupo {x['Grupo']})",
-                               "Diferença": -x["Queda_Consumo"]})
+                               "Diferença": x["Queda_Consumo"]})          # já é atual − anterior (negativa)
     return pd.DataFrame(linhas) if linhas else None
 
 
@@ -712,13 +742,16 @@ def gera_validacao_html(ctx):
     sit = r.get("situacao_ciclos")
     dir_blocos = ([
         _bloco("Tabela — Situação dos ciclos",
-               f"para cada ciclo (grupo de leitura) de {mes}: a situação (Liberado, Em análise, LIS ou Aguardando) e os valores de "
-               "água e esgoto já liberados e ainda em análise.",
+               f"para cada ciclo (grupo de leitura) de {mes}: a situação (Liberado, Em análise, LIS ou Aguardando), o orçado do "
+               "ciclo e os valores de água e esgoto já liberados e ainda em análise. Na tela, segue os filtros de Superintendência, "
+               "Mês, Comparar (planilhas de orçado) e Grupo; a tabela abaixo é a do mês atual, todas as superintendências.",
                ["Situação de cada conta = Situacao Conta da fatura: LIBERADA conta como liberado; EM ANALISE, A REALIZAR LEITURA, "
                 "vazia ou outra conta como em análise",
                 "Prioridade: LIS (hoje é o dia de leitura do ciclo pelo cronograma) → Em análise (ao menos uma conta não liberada) → "
                 "Liberado (todas liberadas) → Aguardando (sem contas e leitura depois de hoje)",
                 "Ciclo já lido pelo cronograma e sem contas na base: Em análise, com aviso",
+                "Ciclos considerados: só os que aparecem na fatura (em qualquer mês da pasta); grupos do cronograma de outras áreas ficam de fora",
+                "Orçado do ciclo = orçado do mês (diretas água ou esgoto) × peso do grupo no faturamento — o mesmo das tabelas de orçado por ciclo",
                 "Hoje = data do computador de quem rodou a análise",
                 "Valores = soma de Valor (R$) por Serviço (água/esgoto), separada em liberado e em análise; contas em análise = ligações distintas"],
                ["<b>Grupo</b>, <b>Situacao Conta</b>, <b>Valor (R$)</b>, <b>Rubrica</b>, <b>N. Ligação</b>",
@@ -780,8 +813,10 @@ def gera_validacao_html(ctx):
                 "Acima = consumo faturado maior que o mínimo; Abaixo = igual ou menor", "Diferença = mês atual − mês anterior"],
                ["<b>Categoria</b>, <b>Consumo Faturado</b>, quantidades de economia por tipo (Qtd. Economia …), <b>Grupo</b>"],
                lambda sup: {"Minimo": filtra_sup(ctx, r.get("minimo"), sup)}, "minimo", ctx=ctx,
-               bases=[("fatura", f"{f_atual_ant}; Serviço = Água; compare Consumo Faturado com o mínimo da Categoria (regras.json)")],
-               montagem=["Uma linha por grupo: acima e abaixo nos dois meses e as diferenças; linha Total"]),
+               bases=[("fatura", f"{f_atual_ant}; Serviço = Água; a coluna 'Acima/Abaixo do mínimo' já traz a classificação de cada "
+                                 "matrícula (com o mínimo e a conta); some Economias_Totais por Grupo e classificação")],
+               montagem=["Uma linha por grupo: acima e abaixo nos dois meses e as diferenças; linha Total",
+                         "Fica fora (e a base diz o motivo): consumo 0, sem economia ou categoria sem mínimo cadastrado"]),
         _bloco("Cards — Situação de lançamento",
                "o que aconteceu com a conta depois de emitida (coluna Situacao Lancamento da fatura de ciclo: entregue, retida, "
                "consolidada, não entregue...). Visão analítica: um card por código; visão sintética: um card por leitura da situação "
@@ -802,12 +837,14 @@ def gera_validacao_html(ctx):
                          "Variações em azul quando sobem e em laranja quando caem; o filtro Superintendência mostra o quadro da SUP"]),
         _bloco("Tabelas — Top 100 clientes com maior queda de consumo (Água / Esgoto)",
                "as ligações que consumiam no mês anterior e consumiram menos no atual.",
-               ["Queda de consumo = consumo anterior − consumo atual (só quedas positivas); Queda % = queda ÷ anterior",
-                "Queda de valor = valor anterior − valor atual; ordenado pela maior queda de consumo, 100 primeiros"],
+               ["Queda de consumo = consumo atual − consumo anterior (negativa: só ligações cujo consumo caiu); Queda % = queda ÷ anterior; "
+                "Queda valor = valor atual − valor anterior",
+                "Ordenado pela maior queda de consumo (a mais negativa), 100 primeiros"],
                ["<b>N. Ligação</b>, <b>Nome Cliente</b>, <b>Grupo</b>, <b>Categoria</b>, <b>Consumo Faturado</b>, <b>Valor (R$)</b>"],
                lambda sup: dict(zip(("Top100 Agua", "Top100 Esgoto"), top(sup)[:2])), "top100", ctx=ctx,
                bases=[("fatura", f"{f_atual_ant}; por Serviço, some Consumo Faturado e Valor por N. Ligação e compare os meses")],
-               montagem=["Uma linha por ligação, do 1º ao 100º; Queda % em laranja quando ≥ o limite de destaque",
+               montagem=["Uma linha por ligação, do 1º ao 100º (a maior queda primeiro); variações negativas em vermelho e Queda % "
+                         "em vermelho, negrito e com fundo quando a queda é ≥ o limite de destaque; valor que subiu fica em preto",
                          "Mostra 15 linhas e o botão 'Mostrar todos'; o Excel completo está no botão da tabela"]),
         _bloco("Tabelas — Top 100 clientes com maior aumento de consumo (Água / Esgoto)",
                "as ligações que faturaram nos dois meses e consumiram mais no atual.",
