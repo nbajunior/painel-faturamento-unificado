@@ -6,12 +6,12 @@ const PYODIDE_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSAO}/full/`;
 const PASTA = "/dados";
 // Arquivos do pacote Python que o site copia para o Pyodide (caminho no site -> pasta virtual /app)
 const ARQUIVOS_PY = [
-  "faturamento/__init__.py", "faturamento/analises.py", "faturamento/base.py", "faturamento/cache_arquivos.py", "faturamento/comparativo.py",
+  "faturamento/__init__.py", "faturamento/analises.py", "faturamento/analitico.py", "faturamento/base.py", "faturamento/cache_arquivos.py", "faturamento/comparativo.py",
   "faturamento/dre.py", "faturamento/dados.py",
   "faturamento/config.py", "faturamento/contexto.py", "faturamento/formatacao.py", "faturamento/leitura.py",
   "faturamento/origem.py", "faturamento/orcado_ciclo.py", "faturamento/previsao.py", "faturamento/projecao_grupos.py", "faturamento/validacao.py", "faturamento/painel_html.py", "faturamento/pipeline.py", "faturamento/progresso.py",
-  "faturamento/relatorio.py", "faturamento/situacao_lancamento.py", "faturamento/situacao_ciclos.py", "faturamento/tabelas_html.py", "faturamento/tarifas.py",
-  "faturamento/top20.py",
+  "faturamento/relatorio.py", "faturamento/situacao_ciclos.py", "faturamento/situacao_grupo.py", "faturamento/situacao_lancamento.py",
+  "faturamento/tabelas_html.py", "faturamento/tarifas.py", "faturamento/top20.py",
   "faturamento/regras.json", "faturamento/assets/relatorio.css", "faturamento/assets/relatorio.js",
 ];
 const SAIDAS = [
