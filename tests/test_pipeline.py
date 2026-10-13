@@ -51,8 +51,9 @@ def test_top100_ordenado_por_queda(analise):
     for aba in ("Top100_Agua", "Top100_Esgoto"):
         df = pd.read_excel(analise.caminho_top100, sheet_name=aba)
         assert 0 < len(df) <= 100
-        assert df["Queda_Consumo"].is_monotonic_decreasing
-        assert (df["Queda_Consumo"] > 0).all()
+        # variações = mês atual − mês anterior: quedas negativas, a maior queda (a mais negativa) primeiro
+        assert df["Queda_Consumo"].is_monotonic_increasing
+        assert (df["Queda_Consumo"] < 0).all() and (df["Queda_%"] <= 0).all()
         assert list(df["Ranking"]) == list(range(1, len(df) + 1))
 
 
@@ -192,6 +193,17 @@ def test_dias_uteis_e_forecast_das_indiretas():
     assert dias_uteis_do_mes("10/2026", dt.date(2026, 9, 1))["uteis_decorridos"] == 0
 
 
+def test_painel_dias_uteis():
+    import datetime as dt
+    import re
+    from faturamento.previsao import painel_dias_uteis_html
+    h = painel_dias_uteis_html("10/2026", dt.date(2026, 10, 7))
+    nums = re.findall(r'<b>(\d+)</b>(já passaram|faltam|no mês)', h)
+    assert nums == [("5", "já passaram"), ("16", "faltam"), ("21", "no mês"), ("4", "já passaram"), ("12", "faltam"), ("16", "no mês")]
+    assert h.count('class="du-util du-passou') == 5 + 1          # 5 no calendário + 1 na legenda
+    assert h.count("du-feriado") >= 2 and "07/10/2026" in h
+
+
 def test_top100_aumento_de_consumo_com_download(analise):
     import base64, io, re
     html = open(analise.caminho_html, encoding="utf-8").read()
@@ -201,16 +213,10 @@ def test_top100_aumento_de_consumo_com_download(analise):
     i = tab.index("Top 100 clientes com maior aumento de consumo — Água")
     assert tab.index("Top 100 clientes com maior queda de consumo — Esgoto") < i
     assert i < tab.index("Top 100 clientes com maior aumento de consumo — Esgoto")
-    # uma seta por tabela: água e esgoto (quedas e aumentos) baixam cada uma a sua lista
-    for arquivo, aba in (("Top100_Aumentos_Agua.xlsx", "Top100_Aumento_Agua"), ("Top100_Aumentos_Esgoto.xlsx", "Top100_Aumento_Esgoto")):
-        b64 = re.search(r'data-arquivo="' + arquivo + r'" [^>]*data-b64="([^"]+)"', tab).group(1)
-        xls = pd.ExcelFile(io.BytesIO(base64.b64decode(b64)))
-        assert xls.sheet_names == [aba]
-        df = pd.read_excel(xls, sheet_name=aba)
-        assert len(df) <= 100 and (df["Aumento_Consumo"] > 0).all()
-        assert df["Aumento_Consumo"].is_monotonic_decreasing
-    for arquivo in ("Top100_Quedas_Agua.xlsx", "Top100_Quedas_Esgoto.xlsx"):
-        assert f'data-arquivo="{arquivo}"' in tab
+    # só a seta ⬇≡ (analítico detalhado) em cada tabela: as setas simples de Excel saíram da aba Análise
+    for k in ("queda-agua", "queda-esgoto", "aumento-agua", "aumento-esgoto"):
+        assert f'data-detalhe="top-{k}"' in tab
+    assert 'btn-just btn-baixar"' not in tab and "Top100_Aumentos_Agua.xlsx" not in tab
 
 
 def test_delta_faturamento_sem_casas_decimais(analise):

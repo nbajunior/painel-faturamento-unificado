@@ -163,7 +163,10 @@ def test_data_de_hoje_vem_do_site(pasta_pequena):
     (HOJE, set(), sc.LIS),
     (dt.date(2026, 9, 5), {"LIBERADA"}, sc.LIBERADO),
     (dt.date(2026, 9, 5), {"LIBERADA", "EM ANALISE"}, sc.EM_ANALISE),
-    (dt.date(2026, 9, 5), {"LIBERADA", "A REALIZAR LEITURA"}, sc.EM_ANALISE),   # base não atualizou
+    (dt.date(2026, 9, 5), {"LIBERADA", "A REALIZAR LEITURA"}, sc.AGUARDANDO),   # ainda falta ler (depois do dia de leitura)
+    (dt.date(2026, 9, 25), {"LIBERADA", "A REALIZAR LEITURA"}, sc.AGUARDANDO),  # e antes do dia de leitura
+    (dt.date(2026, 9, 5), {"EM ANALISE", "A REALIZAR LEITURA"}, sc.EM_ANALISE),  # já tem conta em análise: vence
+    (dt.date(2026, 9, 5), {"OUTRA", "LIBERADA"}, sc.EM_ANALISE),                # situação vazia/desconhecida (aviso)
     (dt.date(2026, 9, 25), set(), sc.AGUARDANDO),            # leitura depois de hoje
     (None, set(), sc.AGUARDANDO),
     (dt.date(2026, 9, 25), {"LIBERADA"}, sc.LIBERADO),        # já tem contas: vale a situação das contas
@@ -182,31 +185,152 @@ def test_situacao_dos_ciclos_na_base(sessao_pequena):
     ctx = sessao_pequena.ctx
     base = ctx.base_completa
     atual = base["Referencia de Leitura"] == ctx.ref_atual
-    grupos = sorted(base.loc[atual, "Grupo"].map(chave_grupo).unique(), key=int)
-    g_lib, g_ana, g_lis, g_real = grupos[:4]
-    chave = base["Grupo"].map(chave_grupo)
+    rot = base["Grupo"].astype(str).str.strip()
+    grupos = sorted(rot[atual].unique(), key=lambda g: int(g))
+    g_lib, g_ana, g_lis, g_agu = grupos[:4]
     base.loc[atual, "Situacao Conta"] = "LIBERADA"
-    primeira = base.index[atual & (chave == g_ana)][0]
+    primeira = base.index[atual & (rot == g_ana)][0]
     base.loc[primeira, "Situacao Conta"] = "EM ANALISE"
-    base.loc[atual & (chave == g_real), "Situacao Conta"] = "A REALIZAR LEITURA"
+    # g_agu ainda não faturou no mês (só no anterior): continua na tabela, como Aguardando
+    original, resumo_original = ctx.base_completa, ctx.situacao_conta_resumo
+    ctx.base_completa = base[~(atual & (rot == g_agu))]
+    ctx.situacao_conta_resumo = resumo_original[resumo_original["fonte"] == "fatura"]      # aqui só a fatura decide
+    ctx.__dict__.pop("_cache_sit_ciclos", None)
     mes = ctx.ref_atual
-    crono = pd.DataFrame({"Grupo": [g_lib, g_ana, g_lis, g_real, "99", "98"],
-                          "Data da Leitura": ["05/09/2026", "06/09/2026", "20/09/2026", "07/09/2026", "25/09/2026", "08/09/2026"],
+    crono = pd.DataFrame({"Grupo": [g_lib, g_ana, g_lis, g_agu, "99", "98"],
+                          "Data da Leitura": ["05/09/2026", "06/09/2026", "20/09/2026", "25/09/2026", "25/09/2026", "08/09/2026"],
                           "Referencia Cronograma": [mes] * 6})
-    ctx.cronograma, avisos_antes = crono, len(ctx.avisos_base)
-    df = sc.calcula(ctx).set_index("Ciclo")
-    assert df.loc[g_lib, "Situação"] == sc.LIBERADO and df.loc[g_lib, "Água Em análise"] == 0
-    assert df.loc[g_ana, "Situação"] == sc.EM_ANALISE and df.loc[g_ana, "Contas em análise"] == 1
-    assert df.loc[g_lis, "Situação"] == sc.LIS
-    assert df.loc[g_real, "Situação"] == sc.EM_ANALISE
-    assert df.loc["99", "Situação"] == sc.AGUARDANDO and df.loc["98", "Situação"] == sc.EM_ANALISE
-    assert any("98" in a for a in ctx.avisos_base[avisos_antes:])     # lido e sem contas: avisa
-    # valores: liberado + em análise = faturamento de água/esgoto do grupo
-    sel = base[atual & (chave == g_ana)]
-    serv = sel["Rubrica"].astype(str).str.upper()
-    assert df.loc[g_ana, "Água Liberado"] + df.loc[g_ana, "Água Em análise"] == pytest.approx(
-        sel.loc[serv.str.contains("AGUA"), "Valor (R$)"].sum())
-    assert "Situação dos ciclos" in sc.gera_html(ctx)
+    ctx.cronograma = crono
+    try:
+        df = sc.calcula(ctx, registra=False).set_index("Ciclo")
+        assert df.loc[g_lib, "Situação"] == sc.LIBERADO and df.loc[g_lib, "Água Em análise"] == 0
+        assert df.loc[g_ana, "Situação"] == sc.EM_ANALISE and df.loc[g_ana, "Contas em análise"] == 1
+        assert df.loc[g_lis, "Situação"] == sc.LIS
+        assert df.loc[g_agu, "Situação"] == sc.AGUARDANDO and df.loc[g_agu, "Água Liberado"] == 0
+        # grupos que só existem no cronograma (outras áreas da empresa) não entram
+        assert "99" not in df.index and "98" not in df.index
+        # valores: liberado + em análise = faturamento de água do grupo no mês
+        sel = base[atual & (rot == g_ana)]
+        serv = sel["Rubrica"].astype(str).str.upper()
+        assert df.loc[g_ana, "Água Liberado"] + df.loc[g_ana, "Água Em análise"] == pytest.approx(
+            sel.loc[serv.str.contains("AGUA"), "Valor (R$)"].sum())
+        # mês passado: só os ciclos que faturaram naquele mês, sem LIS/Aguardando
+        passado = sc.calcula(ctx, ctx.ref_anterior, registra=False)
+        assert set(passado["Ciclo"]) == set(rot[base["Referencia de Leitura"] == ctx.ref_anterior].unique())
+        assert not set(passado["Situação"]) & {sc.LIS, sc.AGUARDANDO}
+    finally:
+        ctx.base_completa, ctx.situacao_conta_resumo = original, resumo_original
+        ctx.__dict__.pop("_cache_sit_ciclos", None)
+
+
+def test_situacao_do_consumo_entra_na_regra(sessao_pequena):
+    """Grupo liberado na fatura com conta EM ANALISE no consumo = Em Análise; com A REALIZAR LEITURA no consumo = Aguardando.
+    A coluna dos comparativos e a tabela usam a mesma classificação."""
+    from faturamento.leitura import chave_grupo
+    from faturamento.situacao_grupo import situacao_dos_grupos
+    ctx = sessao_pequena.ctx
+    base, resumo_original, sit_original, crono_original = ctx.base_completa, ctx.situacao_conta_resumo, ctx.situacao_grupo, ctx.cronograma
+    atual = base["Referencia de Leitura"] == ctx.ref_atual
+    rot = base["Grupo"].astype(str).str.strip()
+    g1, g2 = sorted(rot[atual].unique(), key=lambda g: int(g))[:2]
+    situacao_original = base["Situacao Conta"].copy()
+    base.loc[atual, "Situacao Conta"] = "LIBERADA"
+    consumo = pd.DataFrame({"g": [chave_grupo(g1), chave_grupo(g2)], "ref": [ctx.ref_atual] * 2, "n": [1, 1],
+                            "em_analise": [True, False], "liberada": [False, False], "a_realizar": [False, True],
+                            "outra": [False, False], "fonte": ["consumo"] * 2})
+    ctx.situacao_conta_resumo = consumo
+    ctx.cronograma = ctx.cronograma.iloc[0:0]
+    ctx.situacao_grupo = None
+    ctx.__dict__.pop("_cache_sit_ciclos", None)
+    try:
+        df = sc.calcula(ctx, registra=False).set_index("Ciclo")
+        assert df.loc[g1, "Situação"] == sc.EM_ANALISE and df.loc[g2, "Situação"] == sc.AGUARDANDO
+        sit = situacao_dos_grupos(ctx)
+        assert sit[chave_grupo(g1)] == sc.EM_ANALISE and sit[chave_grupo(g2)] == sc.AGUARDANDO
+    finally:
+        base["Situacao Conta"] = situacao_original
+        ctx.situacao_conta_resumo, ctx.situacao_grupo, ctx.cronograma = resumo_original, sit_original, crono_original
+        ctx.__dict__.pop("_cache_sit_ciclos", None)
+
+
+def test_selo_da_tabela_e_o_mesmo_dos_comparativos(sessao_pequena):
+    """A tabela usa o selo editável dos comparativos (mesmos atributos): a escolha manual vale para os dois."""
+    html = sc.gera_html(sessao_pequena.ctx)
+    assert 'class="sit-grupo' in html and "data-sit-auto=" in html and "data-sit-grupo=" in html and "data-sit-ref=" in html
+    js = open(os.path.join(RAIZ, "faturamento", "assets", "relatorio.js"), encoding="utf-8").read()
+    assert "function situacaoDaLinha" in js and "situacaoCiclosAtualiza();                               // contagens" in js
+
+
+@pytest.fixture(scope="module")
+def sessao_com_orcado(tmp_path_factory):
+    from dados_sinteticos import gera_pasta
+    destino = tmp_path_factory.mktemp("orcado") / "dados"
+    gera_pasta(str(destino), n_ligacoes=120, n_grupos=4, com_dre=True)
+    s = Sessao(str(destino), progresso=lambda pct, desc: None)
+    s.ctx.data_hoje = HOJE
+    s.preparar()
+    s.continuar()
+    return s
+
+
+def test_situacao_dos_ciclos_segue_os_filtros_do_cabecalho(sessao_com_orcado):
+    """Um bloco por superintendência × mês (filtros SUP e Mês), colunas de orçado por planilha (Comparar), linhas com o
+    grupo (filtro Grupo) e o total refeito no navegador."""
+    import re
+    from faturamento.dre import fontes_rf, fontes_sup, lista_sups
+    ctx = sessao_com_orcado.ctx
+    h = sc.gera_html(ctx)
+    blocos = re.findall(r'class="sup-bloco sit-ciclos-bloco" data-sup="([^"]+)" data-mes="([^"]+)"', h)
+    assert {s for s, _ in blocos} == set(lista_sups(ctx))
+    assert {(s, ctx.ref_atual) for s in lista_sups(ctx)} <= set(blocos)
+    assert ("TODAS", ctx.ref_anterior) in blocos                  # mês passado também tem bloco (filtro Mês)
+    for f in fontes_rf(ctx) + fontes_sup(ctx):
+        assert f'data-src="{f}"' in h                         # uma coluna de orçado por planilha
+    rotulos = set(ctx.fatura_total["Grupo"].astype(str).str.strip())
+    assert set(re.findall(r'<tr data-grupo="([^"]+)"', h)) <= rotulos     # mesmos rótulos do filtro de grupos
+    js = open(os.path.join(RAIZ, "faturamento", "assets", "relatorio.js"), encoding="utf-8").read()
+    assert js.count("situacaoCiclosAtualiza();") >= 2       # recalcula ao filtrar grupos e ao trocar o Comparar
+
+
+def test_orcado_do_ciclo_soma_o_orcado_do_mes(sessao_com_orcado):
+    from faturamento.dre import TODAS, orcado
+    ctx = sessao_com_orcado.ctx
+    orc = sc.orcado_por_ciclo(ctx, ctx.ref_atual)
+    assert orc
+    for f, por_grupo in orc.items():
+        total = orcado(ctx, f, TODAS, ctx.ref_atual)
+        if total.get("dA") is not None:
+            assert sum(a for a, _ in por_grupo.values()) == pytest.approx(total["dA"])
+
+
+# ---------- Top 100: quedas como mês atual − mês anterior ----------
+
+def test_top100_quedas_negativas(sessao_pequena):
+    top = sessao_pequena.ctx.resultados["top_agua"]
+    assert (top["Queda_Consumo"] < 0).all() and top["Queda_Consumo"].is_monotonic_increasing
+    assert (top["Queda_%"] <= 0).all()
+    atual, ant = [c for c in top.columns if c.startswith("Consumo ")]
+    assert (top[atual] - top[ant]).round(6).tolist() == top["Queda_Consumo"].round(6).tolist()
+    v_at, v_ant = [c for c in top.columns if c.startswith("Valor R$ ")]
+    assert (top[v_at] - top[v_ant]).round(6).tolist() == top["Queda_Valor_R$"].round(6).tolist()
+
+
+def test_top100_cores_das_quedas():
+    from faturamento.config import DESTAQUE_QUEDA_PCT_TOP100 as LIM
+    from faturamento.tabelas_html import classe_queda_top100 as cls
+    assert cls("Queda_Consumo", -10.0, "Queda") == "top-neg"
+    assert cls("Queda_%", -(LIM - 1), "Queda") == "top-neg"
+    assert cls("Queda_%", -LIM, "Queda") == "top-destaque"
+    assert cls("Queda_Valor_R$", -5.0, "Queda") == "top-neg"
+    assert cls("Queda_Valor_R$", 12.0, "Queda") == ""          # valor subiu apesar da queda: preto
+    assert cls("Aumento_Consumo", 10.0, "Aumento") == ""        # aumentos não mudam
+
+
+def test_top100_quedas_em_vermelho_no_relatorio(sessao_pequena):
+    html = open(sessao_pequena.caminho_html, encoding="utf-8").read()
+    analise = html[html.index('id="view-analise"'):]
+    queda = analise[analise.index("maior queda de consumo"):analise.index("maior aumento de consumo")]
+    assert "class='top-neg'" in queda and "mês atual − mês anterior" in queda
 
 
 # ---------- economias, cancelamento e mínimos ----------
@@ -240,9 +364,11 @@ def test_minimo_das_categorias_publicas_e_15():
     assert REGRAS["consumo_minimo_por_categoria"]["PUB. ESTADUAL"] == 15
 
 
-def test_rubricas_de_cancelamento_da_planilha():
-    assert set(REGRAS["rubricas_cancelamento"]) == {"ABATIMENTO - M3", "CREDITO/DEBITO DE ARRECADACAO - VAN",
-                                                    "DESCONTO JUDICIAL PROVISORIO", "DESCONTO", "CREDITO AJUSTE CONTA"}
+def test_rubricas_de_cancelamento_iguais_as_do_fechamento():
+    """Definido em reunião: as mesmas rubricas usadas no fechamento das outras superintendências (CREDITO AJUSTE CONTA fora)."""
+    assert set(REGRAS["rubricas_cancelamento"]) == {"ABATIMENTO - M3", "COFINS (3,00%) ART.64 LEI Nº 9.430/96",
+                                                    "CRÉDITO DE ARRECADAÇÃO", "CREDITO/DEBITO DE ARRECADACAO - VAN", "DESCONTO",
+                                                    "DESCONTO JUDICIAL PROVISORIO", "IR ESTADUAL", "IR MUNICIPAL"}
 
 
 def test_tabela_de_situacao_nao_usa_classe_de_outra_tabela(sessao_pequena):

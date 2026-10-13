@@ -67,10 +67,9 @@ def test_cancelamento_vem_da_fatura(sessao):
     df = pd.read_excel(os.path.join(pasta, "Fatura.xlsx"), dtype=str)
     df = df[df["Referencia de Leitura"] == "15/09/2026"]
     valor = lambda d: d["Valor Parcela"].str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float).sum()
-    # regra da planilha: só as rubricas marcadas no filtro de cancelamento (IR MUNICIPAL fica de fora)
-    soma = valor(df[df["Rubrica"].isin(["DESCONTO", "ABATIMENTO - M3"])])
-    assert valor(df[df["Rubrica"] == "IR MUNICIPAL"]) != 0          # a base sintética tem IR MUNICIPAL...
-    assert dre.realizado(sessao.ctx, dre.TODAS)["canc"] == pytest.approx(soma)   # ...e ele não entra
+    # rubricas de cancelamento usadas no fechamento das superintendências (regras.json): IR MUNICIPAL entra
+    soma = valor(df[df["Rubrica"].isin(["DESCONTO", "ABATIMENTO - M3", "IR MUNICIPAL"])])
+    assert dre.realizado(sessao.ctx, dre.TODAS)["canc"] == pytest.approx(soma)
 
 
 def test_orcado_rf_e_sup(sessao):
@@ -250,7 +249,10 @@ def test_diretas_tem_so_duas_tabelas_de_orcado_com_seletor(sessao):
     # cada planilha tem um par (Água e Esgoto); só o primeiro par aparece de início
     assert tab.count('class="orc-ciclo-bloco" data-orc-ciclo="RF01T26">') == 1
     assert tab.count('class="orc-ciclo-bloco"') == 3 and tab.count(" hidden>") >= 2
-    assert 'data-src=' not in tab.split("Economias faturadas por ciclo")[0]      # não depende do filtro Comparar do cabeçalho
+    # não depende do filtro Comparar do cabeçalho (exceto a situação dos ciclos, que segue todos os filtros por pedido da área)
+    import re
+    sem_situacao = re.sub(r'<div class="sup-bloco sit-ciclos-bloco".*?</table>\s*</div>\s*</div>', "", tab, flags=re.S)
+    assert 'data-src=' not in sem_situacao.split("Economias faturadas por ciclo")[0]
 
 
 def test_indiretas_financeiro_e_eventos_com_forecast_e_grafico_no_fim(sessao):
@@ -541,18 +543,22 @@ def test_seta_de_cada_situacao_baixa_as_ligacoes(sessao):
     import re
     ctx = sessao.ctx
     html = open(sessao.caminho_html, encoding="utf-8").read()
-    assert html.count('class="btn-sitl-dl"') >= 4 and 'data-sit="50-EMITIDO - RETIDA" data-sup="LAGOS"' in html
-    assert 'class="btn-sitl-dl" data-sup="LAGOS" title="Baixar a base analítica com as matrículas (CSV)"' in html
-    m = re.search(r'<script type="application/octet-stream" id="sitl-detalhe" data-col-sit="([^"]+)"[^>]*>([^<]+)</script>', html)
-    det = pd.read_csv(io.BytesIO(gzip.decompress(base64.b64decode(m.group(2)))), sep=";", decimal=",", dtype={"N. Ligação": str},
+    # só a seta ⬇≡ (analítico detalhado): a de cada card filtra a situação; a simples saiu
+    assert 'class="btn-sitl-dl"' not in html and 'id="sitl-detalhe"' not in html
+    assert re.search(r'<button data-sit="50-EMITIDO - RETIDA" type="button" class="btn-just btn-detalhe" data-detalhe="situacao" '
+                     r'data-sup="LAGOS"', html)
+    assert 'data-gsit="Entregue" type="button" class="btn-just btn-detalhe"' in html
+    b64 = re.search(r'id="analitico-dados" data-gz="1"[^>]*>([^<]+)</script>', html).group(1)
+    det = pd.read_csv(io.BytesIO(gzip.decompress(base64.b64decode(b64))), sep=";", decimal=",", dtype={"N. Ligação": str},
                       encoding="utf-8-sig")
-    col = m.group(1)
-    assert col == "Situação Lançamento Setembro/2026" and "Superintendência" in det.columns
+    col = f"Situação Lançamento {ctx.ref_atual}"
     r = ctx.resultados["situacao_lancamento"]
     for sup in ("TODAS", "LAGOS"):
         d = det if sup == "TODAS" else det[det["Superintendência"] == sup]
         esperado = r[sup].set_index("Situação")["Ligações atual"]
         assert d[col].value_counts().sort_index().to_dict() == esperado[esperado > 0].sort_index().astype(int).to_dict()
+    rs = ctx.resultados["situacao_lancamento_sintetica"]["TODAS"].set_index("Situação")["Ligações atual"]
+    assert det[f"Leitura da situação {ctx.ref_atual}"].value_counts().to_dict() == rs[rs > 0].astype(int).to_dict()
 
 
 def test_dados_para_o_filtro_de_grupos_nos_downloads(sessao):
@@ -567,9 +573,7 @@ def test_dados_para_o_filtro_de_grupos_nos_downloads(sessao):
     sit = json.loads(re.search(r'<script type="application/json" id="sitl-agregados">(.*?)</script>', html, re.S).group(1))
     total = sum(l[3] for l in sit["at"])
     assert total == sessao.ctx.resultados["situacao_lancamento"]["TODAS"]["Ligações atual"].sum()
-    for tipo in ("top", "semfat"):
-        assert f'data-csv-filtrado="{tipo}"' in html
-    assert 'id="semfat-dados"' in html and 'data-top="aumento-esgoto"' in html
+    assert 'data-csv-filtrado=' not in html and 'data-top="aumento-esgoto"' in html
 
 
 def test_executivo_imprime_documento_leve(sessao):
@@ -579,9 +583,97 @@ def test_executivo_imprime_documento_leve(sessao):
     trecho = html[ini:html.index("function imprimirDocumentoLeve")]
     assert "imprimirDocumentoLeve(cont)" in trecho and "window.print()" not in trecho   # a impressão leve fica como reserva
     assert "querySelectorAll('script').forEach(x => x.remove())" in trecho
+    assert "querySelectorAll('.dias-uteis').forEach(x => x.remove())" in html     # no PDF só a tabela do forecast
+    # recortes medidos na cópia que o html2canvas desenha (senão o título da seção escorregava para a página anterior)
+    assert "onclone: (d) =>" in html and "medidas.itens[i]" in html
     # PDF gerado direto (arquivo .pdf), com as seções pedidas, cada uma começando página
     assert "gerarPdfDireto(cont" in trecho
     for secao in ("'DRE - Forecast'", "'Orçado x Realizado'", "'Faturamento Mês a Mês'", "'Indiretas'", "'Análise de Ciclo'"):
         assert secao in trecho
     # o documento do PDF não leva a classe que esconde os filhos do <body> (o quadro do html2canvas ficava em branco)
     assert "(telaComoImpressao ? '<body>' : '<body class=\"modo-executivo\">')" in html
+
+
+def test_base_fatura_traz_o_consumo_minimo(sessao):
+    from faturamento import validacao
+    ctx = sessao.ctx
+    validacao.monta_bases(ctx)
+    fat = validacao.BASES["fatura"]["df"]
+    ra, rn = ctx.ref_atual, ctx.ref_anterior
+    cols = ["Mínimo por economia da categoria (m³)", "Mínimo da matrícula (m³)", "Conta do mínimo", "Acima/Abaixo do mínimo",
+            f"Consumo Faturado mês anterior ({rn})", f"Acima/Abaixo do mínimo mês anterior ({rn})"]
+    assert set(cols) <= set(fat.columns)
+    agua = fat["Rubrica"].str.contains("AGUA", case=False)
+    esgoto = fat["Rubrica"].str.contains("ESGOTO", case=False)
+    assert fat.loc[esgoto, "Acima/Abaixo do mínimo"].isna().all()            # só nas linhas de água
+    assert fat.loc[agua, "Acima/Abaixo do mínimo"].notna().all()
+    assert set(fat.loc[agua, "Acima/Abaixo do mínimo"]) <= {"Acima", "Abaixo", "Fora: consumo 0", "Fora: sem economia",
+                                                           "Fora: categoria sem mínimo"}
+    # bate com a tabela Acima × Abaixo do relatório (economias por grupo e mês)
+    m = ctx.df_minimo_por_grupo.set_index("Grupo")
+    a = fat[agua]
+    for ref, sufixo in ((ra, "Atual"), (rn, "Ant")):
+        x = a[a["Referencia de Leitura"] == ref]
+        for classe in ("Acima", "Abaixo"):
+            soma = x[x["Acima/Abaixo do mínimo"] == classe].groupby("Grupo")["Economias_Totais"].sum()
+            for g, v in soma.items():
+                assert m.loc[str(g), f"{classe}_{sufixo}"] == pytest.approx(v)
+    # mês anterior só nas linhas de água do mês atual; mista mostra a conta somando os tipos
+    assert fat.loc[agua & (fat["Referencia de Leitura"] == rn), f"Consumo Faturado mês anterior ({rn})"].isna().all()
+    atual = a[a["Referencia de Leitura"] == ra]
+    assert atual[f"Acima/Abaixo do mínimo mês anterior ({rn})"].notna().all()
+    com_minimo = atual["Mínimo da matrícula (m³)"].notna()
+    assert atual.loc[com_minimo, "Conta do mínimo"].str.contains("=").all()
+    assert atual.loc[~com_minimo, "Conta do mínimo"].str.contains("sem mínimo cadastrado").all()
+
+
+def test_analitico_por_matricula_bate_com_as_tabelas(sessao):
+    import base64
+    import gzip
+    import io
+    import re
+    ctx = sessao.ctx
+    ra, rn = ctx.ref_atual, ctx.ref_anterior
+    html = open(sessao.caminho_html, encoding="utf-8").read()
+    analise = html[html.index('id="view-analise"'):]
+    for tipo in ("ativas", "matriz", "minimo", "situacao", "top-queda-agua", "top-queda-esgoto", "top-aumento-agua", "top-aumento-esgoto"):
+        assert f'data-detalhe="{tipo}"' in analise, tipo
+    diretas = html[html.index('id="view-tabelas"'):html.index('id="view-analise"')]
+    assert 'data-detalhe="diretas-agua"' in diretas and 'data-detalhe="diretas-esgoto"' in diretas
+    b64 = re.search(r'id="analitico-dados" data-gz="1"[^>]*>([^<]+)</script>', html).group(1)
+    d = pd.read_csv(io.BytesIO(gzip.decompress(base64.b64decode(b64))), sep=";", decimal=",", dtype={"N. Ligação": str, "Grupo": str,
+                    f"Grupo {ra}": str, f"Grupo {rn}": str}, encoding="utf-8-sig")
+    assert d["N. Ligação"].is_unique
+    # ativas × cortadas: soma das economias por grupo e mês bate com a tabela
+    ciclos = ctx.resultados["ciclos"].set_index("Grupo")
+    for ref, suf in ((ra, "Atual"), (rn, "Ant")):
+        for classe in ("Ativa", "Cortada"):
+            x = d[d[f"Ativa/Cortada {ref}"] == classe].groupby(f"Grupo {ref}")[f"Economias {ref}"].sum()
+            for g, v in x.items():
+                assert ciclos.loc[g, f"{classe}_{suf}"] == pytest.approx(v), (ref, classe, g)
+    # acima × abaixo do mínimo
+    m = ctx.df_minimo_por_grupo.set_index("Grupo")
+    for ref, suf in ((ra, "Atual"), (rn, "Ant")):
+        for classe in ("Acima", "Abaixo"):
+            x = d[d[f"Acima/Abaixo do mínimo {ref}"] == classe].groupby(f"Grupo {ref}")[f"Economias {ref}"].sum()
+            for g, v in x.items():
+                assert m.loc[g, f"{classe}_{suf}"] == pytest.approx(v), (ref, classe, g)
+    # diretas: economias faturadas e faturamento por grupo e mês batem com o Comparativo Água / Esgoto
+    for serv, comp in (("água", ctx.comp_agua), ("esgoto", ctx.comp_esgoto)):
+        c = comp.assign(g=comp["Grupo"].astype(str).str.strip().astype(int)).set_index("g")
+        for ref, suf in ((ra, "atual"), (rn, "anterior")):
+            x = d.assign(g=pd.to_numeric(d[f"Grupo {ref}"], errors="coerce")).dropna(subset=["g"])
+            x = x.assign(g=x["g"].astype(int)).groupby("g")
+            eco, val = x[f"Economias faturadas {serv} {ref}"].sum(), x[f"Valor {serv} {ref}"].sum()
+            for g in c.index:
+                assert c.loc[g, f"Economias_{suf}"] == pytest.approx(eco.get(g, 0)), (serv, ref, g)
+                assert c.loc[g, f"Faturamento_{suf}"] == pytest.approx(val.get(g, 0), abs=0.05), (serv, ref, g)
+    # matriz: quem faturou no anterior e não no atual = lista de sem faturamento
+    sem = ctx.resultados["sem_faturamento"]
+    assert set(d.loc[d["Migração de grupo"] == "Sem faturamento atual", "N. Ligação"]) == set(sem["N. Ligação"].astype(str))
+    # top 100: as 100 primeiras quedas de água do ranking completo são as do relatório
+    q = d[d[f"Consumo água {rn}"].notna() & d[f"Consumo água {ra}"].notna()]
+    q = q.assign(queda=q[f"Consumo água {ra}"] - q[f"Consumo água {rn}"])        # atual − anterior: negativa
+    q = q[q["queda"] < 0].sort_values("queda", ascending=True)
+    top = ctx.resultados["top_agua"]
+    assert list(q["queda"].head(len(top)).round(2)) == list(top["Queda_Consumo"].round(2))
