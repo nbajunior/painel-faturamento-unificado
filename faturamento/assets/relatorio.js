@@ -31,6 +31,7 @@ function definirFiltros(parcial) {
     });
     aplicarSupNosGrupos();
     aplicarFontes();
+    situacaoCiclosAtualiza();                               // colunas de orçado (Comparar) da situação dos ciclos
     [['selSup', ESTADO.sup], ['selMes', ESTADO.mes], ['selRef', ESTADO.ref]].forEach(([id, v]) => {
         const el = document.getElementById(id); if (el && v) el.value = v;
     });
@@ -209,6 +210,43 @@ function filtrarPorGrupo() {
     recalcularKPIsResumo();
     refazTops();                                            // Top 100 refeito só com os grupos marcados
     sitlRecalcular();                                       // cards da Situação de lançamento
+    situacaoCiclosAtualiza();                               // situação dos ciclos (aba Diretas)
+}
+
+// situação de uma linha da tabela Situação dos ciclos: a escolhida à mão no selo (se houver) ou a automática
+function situacaoDaLinha(tr) {
+    const selo = tr.querySelector('.sit-grupo[data-sit-grupo]');
+    if (!selo) return tr.dataset.sit;
+    let manuais = {};
+    try { manuais = sitManuais; } catch (e) { /* ainda não carregadas (abertura da página) */ }
+    return (manuais[selo.dataset.sitRef] || {})[selo.dataset.sitGrupo] || selo.dataset.sitAuto;
+}
+
+// Situação dos ciclos (aba Diretas): total, contagens e cabeçalho refeitos com os grupos marcados e as planilhas do Comparar
+function situacaoCiclosAtualiza() {
+    document.querySelectorAll('table.tabela-situacao-ciclos').forEach(t => {
+        const linhas = Array.from(t.querySelectorAll('tr[data-grupo]')).filter(tr => tr.style.display !== 'none');
+        const soma = {}, cont = {};
+        linhas.forEach(tr => {
+            const sit = situacaoDaLinha(tr);
+            cont[sit] = (cont[sit] || 0) + 1;
+            tr.querySelectorAll('td[data-col]').forEach(td => {
+                const v = parseFloat(td.dataset.v);
+                if (!isNaN(v)) soma[td.dataset.col] = (soma[td.dataset.col] || 0) + v;
+            });
+        });
+        t.querySelectorAll('td[data-tot]').forEach(td => {
+            td.textContent = Math.round(soma[td.dataset.tot] || 0).toLocaleString('pt-BR');
+        });
+        const card = t.closest('.card');
+        if (card) card.querySelectorAll('[data-cont]').forEach(b => { b.textContent = cont[b.dataset.cont] || 0; });
+        // "Água (R$)" e "Esgoto (R$)" cobrem só as colunas visíveis (o Comparar esconde as planilhas não escolhidas)
+        ['agua', 'esgoto'].forEach(grp => {
+            const topo = t.querySelector(`th[data-grp-top="${grp}"]`);
+            if (!topo) return;
+            topo.colSpan = Math.max(1, Array.from(t.querySelectorAll(`th[data-grp="${grp}"]`)).filter(th => th.style.display !== 'none').length);
+        });
+    });
 }
 
 function recalcularTotais() {
@@ -683,6 +721,13 @@ function topLinhas(chave, sup) {
     return { colunas: cols.filter((c, i) => i !== iSup), linhas: linhas.map(l => l.filter((v, i) => i !== iSup)) };
 }
 
+// Top 100 quedas: negativo em vermelho; Queda % de −limite ou menos com destaque; positivo (valor que subiu) em preto
+function classeQuedaTop(coluna, valor, pre, limite) {
+    if (pre !== 'Queda' || !['Queda_Consumo', 'Queda_%', 'Queda_Valor_R$'].includes(coluna)) return '';
+    if (typeof valor !== 'number' || !(valor < 0)) return '';
+    return coluna === 'Queda_%' && valor <= -limite ? 'top-destaque' : 'top-neg';
+}
+
 function refazTops() {
     const d = lerJson('top100-dados');
     if (!d) return;
@@ -707,7 +752,9 @@ function refazTops() {
                 else texto = v === null ? '' : String(v);
                 td.textContent = texto;
                 td.style.textAlign = (['Nome_Cliente', 'Grupo', 'Categoria'].includes(c) || c.startsWith('Situação Lançamento')) ? 'left' : 'center';
-                if (c === pre + '_%' && typeof v === 'number' && v >= d.destaque) { td.style.color = cor; td.style.fontWeight = '700'; }
+                if (aumento && c === pre + '_%' && typeof v === 'number' && v >= d.destaque) { td.style.color = cor; td.style.fontWeight = '700'; }
+                const cls = classeQuedaTop(c, v, pre, d.destaque);       // mesma regra de tabelas_html.classe_queda_top100
+                if (cls) td.className = cls;
                 tr.appendChild(td);
             });
             corpo.appendChild(tr);
@@ -761,32 +808,142 @@ function sitlRecalcular() {
             varia('dlig', at[0] - ant[0], 0); pos('vol', fmtBR(at[2]));
             pos('vme', fmtBR(at[1] ? at[2] / at[1] : 0, 2)); pos('vmeant', fmtBR(ant[1] ? ant[2] / ant[1] : 0, 2));
             pos('val', 'R$ ' + fmtBR(at[3], 2)); varia('dval', at[3] - ant[3], 2);
-            const seta = card.querySelector('.btn-sitl-dl'); if (seta) seta.style.display = at[0] ? '' : 'none';
+            const seta = card.querySelector('.btn-detalhe'); if (seta) seta.style.display = at[0] ? '' : 'none';
         });
     });
 }
 
-// Botões Excel com alternativa: com grupos desmarcados, baixa o CSV refeito só com os grupos marcados
-async function baixarCsvFiltrado(alt) {
-    const tipo = alt.dataset.csvFiltrado, sufixo = '_grupos_filtrados.csv';
-    if (tipo === 'top') {
-        let colunas = null; const linhas = [];
-        alt.dataset.tops.split(',').forEach(k => {
-            const r = topLinhas(k, alt.dataset.sup || 'TODAS'); if (!r) return;
-            colunas = ['Lista'].concat(r.colunas);
-            r.linhas.forEach(l => linhas.push([k.endsWith('agua') ? 'Água' : 'Esgoto'].concat(l)));
-        });
-        if (colunas) baixarTexto(csvDe(colunas, linhas), alt.dataset.nome + sufixo);
-    } else if (tipo === 'semfat') {
-        const el = document.getElementById('semfat-dados'); if (!el) return;
-        const bin = atob(el.textContent.trim()), bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const texto = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
-        const filtros = {}; filtros[el.dataset.colGrupo] = gruposFiltro();
-        const csv = filtraCsv(texto, filtros);
-        if (csv !== null) baixarTexto(csv, alt.dataset.nome + sufixo);
+// ===== Analítico por matrícula da aba Análise (seta ⬇≡ ao lado de cada tabela) =====
+// O analítico vem embutido uma vez (script#analitico-dados, CSV em gzip): uma linha por ligação, mês anterior e atual
+// lado a lado. Cada seta baixa as colunas e as linhas da sua tabela, com os filtros de Superintendência e Grupo.
+let analiticoCache = null;
+async function lerAnalitico() {
+    if (analiticoCache) return analiticoCache;
+    const el = document.getElementById('analitico-dados');
+    if (!el) return null;
+    const texto = new TextDecoder('utf-8').decode(await bytesEmbutidos(el));
+    const registros = [];
+    let ini = 0, aspas = false, t = texto.charCodeAt(0) === 0xFEFF ? texto.slice(1) : texto;
+    for (let i = 0; i < t.length; i++) {
+        const c = t.charCodeAt(i);
+        if (c === 34) aspas = !aspas;
+        else if (c === 10 && !aspas) { registros.push(t.slice(ini, i)); ini = i + 1; }
     }
+    if (ini < t.length) registros.push(t.slice(ini));
+    const campos = (r) => {
+        const out = []; let atual = '', q = false;
+        for (let i = 0; i < r.length; i++) {
+            const c = r[i];
+            if (c === '"') { if (q && r[i + 1] === '"') { atual += '"'; i++; } else q = !q; }
+            else if (c === ';' && !q) { out.push(atual); atual = ''; }
+            else if (c !== '\r' || q) atual += c;
+        }
+        out.push(atual);
+        return out;
+    };
+    const cab = campos(registros[0]);
+    const linhas = registros.slice(1).filter(Boolean).map(campos);
+    analiticoCache = { cab, linhas, ra: el.dataset.refAtual, rn: el.dataset.refAnterior, mes: el.dataset.mes };
+    return analiticoCache;
 }
+
+const numBR = (v) => (v === '' || v == null ? null : parseFloat(String(v).replace(',', '.')));
+
+// colunas e linhas de cada tabela; "top-…": ranking completo calculado aqui (todas as ligações com queda/aumento)
+function definicaoAnalitico(tipo, ra, rn) {
+    const base = ['N. Ligação', 'Nome Cliente', 'Categoria', 'Superintendência', 'Grupo'];
+    const par = (nome) => [`${nome} ${rn}`, `${nome} ${ra}`];
+    const algum = (...cols) => (v) => cols.some((c) => v(c) !== '');
+    switch (tipo) {
+        case 'ativas': return { nome: 'Ativas_x_Cortadas', cols: base.concat(par('Grupo'), par('Situação Ligação'), par('Ativa/Cortada'),
+            par('Economias'), par('Consumo água')), filtro: algum(...par('Ativa/Cortada')) };
+        case 'matriz': return { nome: 'Migracao_de_Grupos', cols: base.concat(par('Grupo'), ['Migração de grupo'], par('Economias'), par('Consumo água')),
+            filtro: (v) => v('Migração de grupo') !== 'Sem consumo nos dois meses' };
+        case 'minimo': return { nome: 'Consumo_Minimo', cols: base.concat(par('Economias'), par('Consumo água'), par('Mínimo da matrícula'),
+            [`Conta do mínimo ${ra}`], par('Acima/Abaixo do mínimo'), ['Mudança de classe']), filtro: algum(...par('Acima/Abaixo do mínimo')),
+            extra: { 'Mudança de classe': (v) => { const a = v(`Acima/Abaixo do mínimo ${rn}`), b = v(`Acima/Abaixo do mínimo ${ra}`);
+                return a && b ? (a === b ? 'Manteve' : `${a} → ${b}`) : ''; } } };
+        case 'situacao': return { nome: 'Situacao_Lancamento', cols: base.concat(par('Situação Lançamento'), par('Leitura da situação'),
+            par('Situação Ligação'), par('Economias'), par('Consumo água'), par('Valor total'), ['Δ valor total']),
+            filtro: algum(...par('Situação Lançamento')) };
+    }
+    const d = /^diretas-(agua|esgoto)$/.exec(tipo);
+    if (d) {
+        // Diretas: de quais matrículas vieram as variações de economias, volume e faturamento (maiores quedas primeiro)
+        const serv = d[1] === 'agua' ? 'água' : 'esgoto';
+        const [eAnt, eAt] = par(`Economias faturadas ${serv}`), [cAnt, cAt] = par(`Consumo ${serv}`), [vAnt, vAt] = par(`Valor ${serv}`);
+        const n = (v, c) => numBR(v(c)) || 0, dif = (a, b) => (v) => Math.round((n(v, b) - n(v, a)) * 100) / 100;
+        return { nome: `Diretas_${d[1] === 'agua' ? 'Agua' : 'Esgoto'}`, grupos: par('Grupo'),
+            cols: base.concat(par('Grupo'), ['Migração de grupo'], par('Situação Ligação'), par('Situação Lançamento'),
+                [eAnt, eAt, 'Δ economias', cAnt, cAt, 'Δ consumo', vAnt, vAt, 'Δ valor', 'Δ % valor', 'O que aconteceu']),
+            filtro: (v) => n(v, vAnt) !== 0 || n(v, vAt) !== 0 || n(v, eAnt) !== 0 || n(v, eAt) !== 0,
+            extra: {
+                'Δ economias': dif(eAnt, eAt), 'Δ consumo': dif(cAnt, cAt), 'Δ valor': dif(vAnt, vAt),
+                'Δ % valor': (v) => { const a = n(v, vAnt); return a ? Math.round((n(v, vAt) - a) / a * 1000) / 10 : null; },
+                'O que aconteceu': (v) => {
+                    const a = n(v, vAnt), b = n(v, vAt), ga = v(`Grupo ${rn}`), gb = v(`Grupo ${ra}`);
+                    if (a && !b) return 'Deixou de faturar no mês atual';
+                    if (!a && b) return 'Passou a faturar no mês atual';
+                    if (ga && gb && normGrupo(ga) !== normGrupo(gb)) return `Mudou do grupo ${ga} para o ${gb}`;
+                    if (n(v, eAt) < n(v, eAnt)) return b < a ? 'Caiu: perdeu economias' : 'Perdeu economias';
+                    if (n(v, eAt) > n(v, eAnt)) return b > a ? 'Subiu: ganhou economias' : 'Ganhou economias';
+                    return b < a ? 'Caiu: menor consumo/valor' : b > a ? 'Subiu: maior consumo/valor' : 'Igual';
+                },
+            },
+            ordem: 'Δ valor', crescente: true };
+    }
+    const m = /^top-(queda|aumento)-(agua|esgoto)$/.exec(tipo);
+    if (!m) return null;
+    const serv = m[2] === 'agua' ? 'água' : 'esgoto', queda = m[1] === 'queda', P = queda ? 'Queda' : 'Aumento';
+    const cAnt = `Consumo ${serv} ${rn}`, cAt = `Consumo ${serv} ${ra}`;
+    return { nome: `Ranking_${P}_${m[2] === 'agua' ? 'Agua' : 'Esgoto'}`, ranking: true,
+        cols: ['Ranking'].concat(base, [`Grupo ${ra}`], par('Situação Lançamento'), [`Situação Ligação ${ra}`], par('Economias'),
+            [cAnt, cAt, `${P} de consumo`, `${P} %`], par(`Valor ${serv}`), [`${P} de valor`], par('Acima/Abaixo do mínimo')),
+        // variações = mês atual − mês anterior (como no Top 100 da tela): na queda saem negativas
+        filtro: (v) => v(cAnt) !== '' && v(cAt) !== '' && (queda ? numBR(v(cAt)) - numBR(v(cAnt)) < 0 : numBR(v(cAt)) - numBR(v(cAnt)) > 0),
+        extra: {
+            [`${P} de consumo`]: (v) => Math.round((numBR(v(cAt)) - numBR(v(cAnt))) * 100) / 100,
+            [`${P} %`]: (v) => { const a = numBR(v(cAnt)); if (!a) return null; return Math.round((numBR(v(cAt)) - a) / a * 1000) / 10; },
+            [`${P} de valor`]: (v) => { const a = numBR(v(`Valor ${serv} ${rn}`)) || 0, b = numBR(v(`Valor ${serv} ${ra}`)) || 0;
+                return Math.round((b - a) * 100) / 100; },
+        },
+        ordem: `${P} de consumo`, crescente: queda };
+}
+
+document.addEventListener('click', async function (e) {
+    const b = e.target.closest && e.target.closest('.btn-detalhe');
+    if (!b) return;
+    try {
+        const a = await lerAnalitico();
+        if (!a) return;
+        const def = definicaoAnalitico(b.dataset.detalhe, a.ra, a.rn);
+        if (!def) return;
+        const idx = Object.fromEntries(a.cab.map((c, i) => [c, i]));
+        const bloco = b.closest('.sup-top-bloco');
+        const sup = bloco ? bloco.dataset.sup : (ESTADO.sup || 'TODAS'), grupos = gruposFiltro();
+        let linhas = a.linhas.filter((l) => {
+            const v = (c) => (idx[c] === undefined ? '' : (l[idx[c]] || ''));
+            const sit = b.dataset.sit !== undefined ? v(`Situação Lançamento ${a.ra}`) === b.dataset.sit
+                : b.dataset.gsit !== undefined ? v(`Leitura da situação ${a.ra}`) === b.dataset.gsit : true;
+            return (sup === 'TODAS' || v('Superintendência') === sup) && sit && def.filtro(v)
+                && (!grupos || (def.grupos || ['Grupo']).some((c) => v(c) !== '' && grupos.has(normGrupo(v(c)))));
+        }).map((l) => {
+            const v = (c) => (idx[c] === undefined ? '' : (l[idx[c]] || ''));
+            return def.cols.map((c) => (def.extra && def.extra[c] ? def.extra[c](v) : c === 'Ranking' ? 0 : v(c)));
+        });
+        if (def.ordem) {
+            const io = def.cols.indexOf(def.ordem);
+            linhas.sort((x, y) => (def.crescente ? (x[io] || 0) - (y[io] || 0) : (y[io] || 0) - (x[io] || 0)));
+            if (def.ranking) linhas.forEach((l, i) => { l[0] = i + 1; });
+        }
+        const sitNome = (b.dataset.sit || b.dataset.gsit || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const nome = `${def.nome}${sitNome ? '_' + sitNome : ''}_${a.mes}${sup !== 'TODAS' ? '_' + sup.replace(/[^A-Za-z0-9]/g, '') : ''}${grupos ? '_grupos_filtrados' : ''}.csv`;
+        baixarTexto(csvDe(def.cols, linhas), nome);
+    } catch (erro) {
+        alert('Não foi possível baixar o analítico neste navegador (' + erro.message + ').');
+    }
+});
 
 // Situação de lançamento: botão Analítica / Sintética (vale para os quadros de todas as SUPs; lembra a última escolha)
 function sitlVisao(visao) {
@@ -803,40 +960,6 @@ document.addEventListener('click', function (e) {
 document.addEventListener('DOMContentLoaded', function () {
     let v = null; try { v = localStorage.getItem('faturamento_sitl_visao'); } catch (e) { /* sem armazenamento */ }
     if (v === 'sintetica') sitlVisao(v);
-});
-
-// Setas da Situação de lançamento: a do título baixa todas as matrículas; a de cada card, as daquela situação (analítica)
-// ou de todos os códigos do grupo (sintética) — sempre da SUP do quadro e dos grupos marcados.
-// A lista vem embutida uma vez, em gzip (script#sitl-detalhe); o navegador descompacta na hora.
-document.addEventListener('click', async function (e) {
-    const b = e.target.closest && e.target.closest('.btn-sitl-dl');
-    if (!b) return;
-    const el = document.getElementById('sitl-detalhe');
-    if (!el) return;
-    try {
-        const bin = atob(el.textContent.trim()), bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const fluxo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-        const texto = await new Response(fluxo).text();
-        const filtros = {};
-        if (b.dataset.sit !== undefined) filtros[el.dataset.colSit] = b.dataset.sit;
-        else if (b.dataset.gsit !== undefined) filtros[el.dataset.colGsit] = b.dataset.gsit;
-        if (b.dataset.sup && b.dataset.sup !== 'TODAS') filtros['Superintendência'] = b.dataset.sup;
-        const grupos = gruposFiltro();
-        if (grupos) filtros['Grupo'] = grupos;
-        const csv = filtraCsv(texto, filtros);
-        if (csv === null) return;
-        const partes = [b.dataset.sit || b.dataset.gsit || 'todas', b.dataset.sup && b.dataset.sup !== 'TODAS' ? b.dataset.sup : '']
-            .filter(Boolean).join('_');
-        const nome = el.dataset.arquivo + '_' + partes.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') + (grupos ? '_grupos_filtrados' : '') + '.csv';
-        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-        const a = document.createElement('a');
-        a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch (erro) {
-        alert('Não foi possível baixar a lista desta situação neste navegador (' + erro.message + ').');
-    }
 });
 
 // base64 (e gzip, com data-gz="1") embutido num <script> → bytes do arquivo
@@ -882,8 +1005,6 @@ document.addEventListener('click', async function (e) {
 document.addEventListener('click', function (e) {
     const b = e.target.closest && e.target.closest('.btn-baixar');
     if (!b) return;
-    const alt = b.closest('[data-csv-filtrado]');
-    if (alt && gruposFiltro()) { baixarCsvFiltrado(alt); return; }
     const bin = atob(b.dataset.b64), bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -1032,6 +1153,7 @@ function gerarExecutivo(libs) {
             catch (e) { copias[i].remove(); }
         });
         c.querySelectorAll('script').forEach(x => x.remove());          // só o conteúdo: nada roda no documento do PDF
+        c.querySelectorAll('.dias-uteis').forEach(x => x.remove());     // no PDF vai só a tabela do forecast (sem o painel de dias úteis)
         c.querySelectorAll('[contenteditable]').forEach(x => x.removeAttribute('contenteditable'));
         c.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
         c.removeAttribute('id');
@@ -1125,21 +1247,40 @@ async function gerarPdfDireto(cont, libs, nome) {
         let y = M, primeira = true;
         const novaPagina = () => { pdf.addPage(); y = M; };
         const raiz = doc.getElementById('view-executivo') || doc.body.firstElementChild;
-        // uma única "foto" do Executivo inteiro (rápido); depois cada quadro é recortado dela pela posição na tela
+        // uma única "foto" do Executivo inteiro (rápido); depois cada quadro é recortado dela pela posição.
+        // As posições são medidas na CÓPIA que o html2canvas desenha (onclone), não no documento original: em alguns
+        // computadores (barra de rolagem, escala do Windows, fontes) a cópia quebra o texto diferente, os quadros ficam
+        // com outra altura e o recorte "escorregava" — o título da seção seguinte ia parar no fim da página anterior.
         const ESC = 2;
+        let medidas = null;
         const foto = await w.html2canvas(raiz, { scale: ESC, backgroundColor: '#FFFFFF', logging: false, imageTimeout: 3000,
-            windowWidth: largura, width: raiz.scrollWidth, height: raiz.scrollHeight });
+            windowWidth: largura, windowHeight: Math.max(800, Math.ceil(raiz.scrollHeight) + 100),
+            onclone: (d) => {
+                d.documentElement.style.overflow = 'hidden'; d.body.style.overflow = 'hidden';     // sem barra de rolagem na cópia
+                const rc = d.getElementById('view-executivo') || d.body.firstElementChild, b0 = rc.getBoundingClientRect();
+                medidas = { altura: b0.height, itens: Array.from(rc.children).map(el => {
+                    const r = el.getBoundingClientRect(); return { topo: r.top - b0.top, alt: r.height }; }) };
+            } });
         const r0 = raiz.getBoundingClientRect();
+        const filhos = Array.from(raiz.children);
+        // px da cópia → px da foto (a foto tem a altura da cópia × escala)
+        const kFoto = medidas && medidas.altura ? foto.height / medidas.altura : ESC;
+        const posicao = (el, i) => {
+            const m = medidas && medidas.itens.length === filhos.length ? medidas.itens[i] : null;
+            if (m) return { topo: m.topo * kFoto, altPx: m.alt * kFoto };
+            const r = el.getBoundingClientRect();
+            return { topo: (r.top - r0.top) * ESC, altPx: r.height * ESC };
+        };
         const recorte = (topoPx, altPx) => {
             const c = document.createElement('canvas'); c.width = foto.width; c.height = Math.max(1, Math.round(altPx));
             c.getContext('2d').drawImage(foto, 0, Math.round(topoPx), foto.width, c.height, 0, 0, foto.width, c.height);
             return c.toDataURL('image/jpeg', 0.92);
         };
         const mmPorPx = LW / foto.width;
-        for (const el of Array.from(raiz.children)) {
-            const r = el.getBoundingClientRect();
-            if (!r.height) continue;
-            const topo = (r.top - r0.top) * ESC, altPx = r.height * ESC, alt = altPx * mmPorPx;
+        for (const [i, el] of filhos.entries()) {
+            const { topo, altPx } = posicao(el, i);
+            if (!altPx) continue;
+            const alt = altPx * mmPorPx;
             if (el.classList.contains('exec-secao') && !primeira && y > M) novaPagina();
             if (alt <= LH) {
                 if (y + alt > M + LH) novaPagina();
@@ -1181,7 +1322,8 @@ function montaDocumentoExecutivo(cont, telaComoImpressao) {
     let estilos = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
     // PDF direto: o documento é desenhado na tela, então as regras de impressão do Executivo passam a valer na tela também
     if (telaComoImpressao) estilos = estilos.replace(/@media\s+print/g, '@media all') +
-        '\n#view-executivo .card, #view-executivo .tabela-wrap { overflow: visible !important; }';   // nada cortado na foto
+        '\n#view-executivo .card, #view-executivo .tabela-wrap { overflow: visible !important; }' +   // nada cortado na foto
+        '\nhtml, body { overflow: hidden !important; }';            // sem barra de rolagem: a largura não muda entre documento e foto
     const fontes = telaComoImpressao ? '' : Array.from(document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]')).map(l => l.outerHTML).join('');
     return '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>' +
         (document.title || 'Relatório Executivo').replace(/</g, '&lt;') + ' — Executivo</title>' + fontes +
@@ -1212,3 +1354,59 @@ function imprimirDocumentoLeve(cont) {
         setTimeout(() => { if (document.body.contains(fr)) fr.remove(); }, 120000);   // garantia, se afterprint não vier
     });
 }
+
+// ===== Situação do grupo (aba Diretas): o selo é editável — a escolha manual vale para o grupo em todas as tabelas =====
+// Guardada no navegador por mês (como as edições do forecast); "Automático" volta à regra (LIS / Aguardando / Em Análise / Liberado).
+const SIT_LS = 'faturamento_situacao_grupo';
+const SIT_OPCOES = ['Liberado', 'Em Análise', 'LIS', 'Aguardando'];
+const SIT_CLASSE = { 'Liberado': 'sit-liberado', 'Em Análise': 'sit-analise', 'LIS': 'sit-lis', 'Aguardando': 'sit-aguardando' };
+let sitManuais = {};
+try { sitManuais = JSON.parse(localStorage.getItem(SIT_LS) || '{}') || {}; } catch (e) { /* sem armazenamento: vale só nesta abertura */ }
+function sitSalvar() { try { localStorage.setItem(SIT_LS, JSON.stringify(sitManuais)); } catch (e) { /* ignora */ } }
+function sitAplicar(el) {
+    const auto = el.dataset.sitAuto, man = (sitManuais[el.dataset.sitRef] || {})[el.dataset.sitGrupo];
+    const v = man || auto;
+    el.className = 'sit-grupo ' + (SIT_CLASSE[v] || '') + (man ? ' sit-manual' : '');
+    el.textContent = v;
+    if (man) { const l = document.createElement('span'); l.className = 'sit-lapis'; l.textContent = ' ✎'; el.appendChild(l); }
+    el.title = man ? `Alterada manualmente (automática: ${auto}) — clique para mudar` : 'Situação automática — clique para alterar';
+}
+function sitAplicarGrupo(ref, grupo) {
+    document.querySelectorAll('.sit-grupo[data-sit-grupo]').forEach(el => {
+        if (el.dataset.sitRef === ref && el.dataset.sitGrupo === grupo) sitAplicar(el);
+    });
+    situacaoCiclosAtualiza();                               // contagens da Situação dos ciclos com a escolha manual
+}
+document.querySelectorAll('.sit-grupo[data-sit-grupo]').forEach(sitAplicar);
+situacaoCiclosAtualiza();
+function sitEditar(el) {
+    if (el.nextElementSibling && el.nextElementSibling.classList.contains('sit-escolha')) return;
+    const ref = el.dataset.sitRef, grupo = el.dataset.sitGrupo, man = (sitManuais[ref] || {})[grupo] || '';
+    const sel = document.createElement('select');
+    sel.className = 'sit-escolha';
+    sel.setAttribute('aria-label', 'Situação do grupo ' + grupo);
+    [['', `Automático (${el.dataset.sitAuto})`]].concat(SIT_OPCOES.map(o => [o, o])).forEach(([v, t]) => {
+        const op = document.createElement('option'); op.value = v; op.textContent = t; if (v === man) op.selected = true; sel.appendChild(op);
+    });
+    let fechada = false;
+    const fecha = () => { if (fechada) return; fechada = true; sel.remove(); el.style.display = ''; };
+    sel.addEventListener('change', () => {
+        const m = sitManuais[ref] = sitManuais[ref] || {};
+        if (sel.value) m[grupo] = sel.value; else delete m[grupo];
+        if (!Object.keys(m).length) delete sitManuais[ref];
+        sitSalvar(); sitAplicarGrupo(ref, grupo); fecha();
+    });
+    sel.addEventListener('blur', fecha);
+    sel.addEventListener('keydown', ev => { if (ev.key === 'Escape') fecha(); });
+    el.style.display = 'none';
+    el.after(sel);
+    sel.focus();
+}
+document.addEventListener('click', e => {
+    const el = e.target.closest && e.target.closest('.sit-grupo[data-sit-grupo]');
+    if (el) sitEditar(el);
+});
+document.addEventListener('keydown', e => {
+    const el = e.target.closest && e.target.closest('.sit-grupo[data-sit-grupo]');
+    if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sitEditar(el); }
+});
